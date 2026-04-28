@@ -431,7 +431,7 @@ async def update_item(item_id: str, payload: dict, user: User = Depends(get_curr
     )
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Not found")
-    doc = await db.journal_items.find_one({"id": item_id}, {"_id": 0})
+    doc = await db.journal_items.find_one({"id": item_id, "user_id": user.user_id}, {"_id": 0})
     return serialize_item(doc)
 
 

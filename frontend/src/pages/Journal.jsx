@@ -77,7 +77,7 @@ export default function Journal() {
             });
             const note = r.data?.note;
             const extracted = r.data?.extracted || [];
-            setItems((prev) => [...extracted.reverse(), note, ...prev]);
+            setItems((prev) => [...[...extracted].reverse(), note, ...prev]);
             toast.success(extracted.length ? `Saved + ${extracted.length} item${extracted.length > 1 ? "s" : ""}` : "Saved");
         } catch (e) {
             toast.error("Could not save voice note");
@@ -92,7 +92,7 @@ export default function Journal() {
             const r = await api.post("/notes/text", { text });
             const note = r.data?.note;
             const extracted = r.data?.extracted || [];
-            setItems((prev) => [...extracted.reverse(), note, ...prev]);
+            setItems((prev) => [...[...extracted].reverse(), note, ...prev]);
             if (extracted.length) toast.success(`Sorted into ${extracted.length} item${extracted.length > 1 ? "s" : ""}`);
         } catch {
             toast.error("Could not save note");

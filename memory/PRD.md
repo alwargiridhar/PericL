@@ -6,64 +6,64 @@ A personal **mirror, not an assistant**. PericL helps the user convert thoughts 
 
 The chat must always feel like the user's own voice — slightly calmer, slightly more honest, slightly more disciplined.
 
-## The Mirror system prompt (iter 5)
+## Mirror system prompt (iter 5)
 Always executes 4 steps and ends with EXACTLY ONE 🎯 Next Move (<15 min, specific, aligned to a top goal):
-1. **Clarify** — sharpen what the user actually means
-2. **Mirror** — match tone, sentence length; remove confusion, reduce excuses
-3. **Reality check** — compare goals vs actual behavior; call out drift calmly
-4. **Direct** — single Next Move at the end
-
-Other rules: drift detection ("You're drifting from what you said matters"), time-reality engine for 90-day windows, mood-aware tone (low → softer/smaller; high → push harder), no markdown headings, no multiple steps, no coach/therapist voice, never "as an AI".
-
-### Context inputs the prompt consumes
-- Top 3 goals (parsed from `profile.goals`, deduped)
-- Identity (`profile.aspirations`)
-- MBTI + strengths/growth
-- Behavior signals (last 7-14 days):
-  `voice_text_entries_7d`, `tasks_completed_7d`, `open_tasks`,
-  `missed_or_overdue_reminders`, `overdue_titles`,
-  `days_since_last_entry`, `top_moods_7d`
-- Recent moods + current_input mood (cheap regex heuristic, avoids extra LLM call)
+1. **Clarify**, 2. **Mirror**, 3. **Reality check**, 4. **Direct (one Next Move)**.
+Inputs: top 3 goals, identity, MBTI/Big Five, behavior signals (entries/tasks/reminders/moods/last 7-14d), mood (regex inferred), active missions with stats.
 
 ## Architecture
-- Backend (FastAPI + Motor + MongoDB): /app/backend/server.py
-  - Auth (Emergent Google) + auto super_admin for `alwargiridhar@gmail.com`
+- Backend (FastAPI + Motor + MongoDB): /app/backend/server.py (~2200 lines)
+  - Auth: Emergent Google + auto super_admin for `alwargiridhar@gmail.com`
   - Cloud user-content endpoints (mode=cloud)
-  - Stateless AI endpoints (mode=local/never): `/ai/transcribe`, `/categorize`, `/chat-stateless`, `/recap-stateless`, `/personality-analyze`, `/daily-prompt-pick`
-  - Privacy: `/storage/pref` (GET/PUT), `/storage/prompt-shown`
+  - Stateless AI: `/ai/transcribe`, `/categorize`, `/chat-stateless`, `/recap-stateless`, `/personality-analyze`, `/big-five-analyze`, `/daily-prompt-pick`, `/detect-progress`
+  - **Streaming SSE**: `/ai/chat/stream` (cloud, persists), `/ai/chat-stateless/stream` (local) — uses litellm.acompletion via Emergent proxy
+  - **Search**: `/search?q=` across journal_items + ai_messages
+  - **Mood timeline**: `/mood/timeline?days=`
+  - **Big Five**: `/personality/big-five-assess`
+  - **Sync**: `/sync/import` (idempotent bulk upsert), `/sync/export`
+  - **Audit log**: `/admin/audit-log` (rows written on role change + delete user)
+  - Privacy: `/storage/pref` GET/PUT, `/storage/prompt-shown`
   - Admin: `/admin/users`, `/admin/users/{id}/role`, `/admin/users/{id}` DELETE, `/admin/stats`
-  - Pydantic-typed `MbtiScores`
-  - Mirror prompt builder + `_parse_top_goals` + `_compute_behavior_signals_from_items` + `_infer_mood_quick`
+  - Missions: `/missions`, `/missions/{id}/progress`, `/ai/detect-progress`
 
-- Frontend (React + CRA + Tailwind + shadcn/ui)
-  - Pages: Login · Journal · AiChat · Profile · PersonalityAssessment · PersonalityResult · DailyPrompt · Privacy · Admin
-  - StorageContext routes via `lib/storage.js` (cloud or local)
-  - `lib/storage.js` chat.send (local) computes behavior signals + mood client-side and posts to /ai/chat-stateless
-  - MoodEmojiBurst on Chat — privacy-aware, supportive emojis even for sad/stressed
-  - Header tagline 'Personal Voice Journal'; admin entry for admin/super_admin; manage-password → Google security
-  - Footer 'Personal Voice Journal · © Giridhar Alwar' on every page
+- Frontend (React CRA + Tailwind + shadcn/ui)
+  - Pages: Login · Journal · AiChat · Profile · Search · PersonalityAssessment (chooser) · MbtiAssessment · BigFiveAssessment · BigFiveResult · PersonalityResult · DailyPrompt · Privacy · Admin · Missions
+  - Components: Header (search btn) · TimelineItem (snooze dropdown for reminders) · MoodChart (recharts) · MoodEmojiBurst · CloudSyncPrompt · RecapDrawer · VoiceDock · Footer
+  - Hooks: useRecorder · useSpeechRecognition · usePushReminders (foreground browser Notifications)
+  - StorageContext gates child rendering until mode is loaded → no more local/cloud race
+  - lib/storage.js: chat.send + chat.sendStream (SSE), journal, missions, profile, personality (MBTI + Big Five), search, mood, prompt, recap, migrateLocalToCloud, migrateCloudToLocal
 
 ## Roles
-- `super_admin` — only `alwargiridhar@gmail.com`. Manages admins, deletes users, grants authority. Cannot be demoted.
-- `admin` — granted by super admin. Reads all users, demotes regular users.
+- `super_admin` — `alwargiridhar@gmail.com` only. Manages admins/users.
+- `admin` — granted by super admin. Reads users, demotes regular users.
 - `user` — default.
 
-## Personas
-- Solo voice journaler who needs structure
-- Self-developer using daily prompts + MBTI growth
-- Privacy-conscious user keeping data on device
-- Super admin / admin moderating
+## Privacy modes
+- `local` (default) — content stays on device, AI calls stateless
+- `cloud` — managed sync to MongoDB
+- `never` — local + suppress monthly nudge
 
 ## Implemented (cumulative)
-- 2026-04-28 — Iter 1: Auth + voice/text journal + Whisper + GPT-5.2 categorize + timeline + reminders + recap (Gemini 3 Flash) + theme.
-- 2026-04-28 — Iter 2: Profile builder, MBTI test, AI-personalized result analyzer, AI chat, daily reflection + history.
-- 2026-04-28 — Iter 3: Identity rewrite (no AI mentions, mirror voice), privacy-first storage abstraction (local + IDB audio), monthly cloud-sync modal, stateless AI endpoints, Privacy page, © Giridhar Alwar.
-- 2026-04-28 — Iter 4: Floating mood emoji burst (privacy-aware), 'Personal Voice Journal' tagline, super admin auto-promote, Admin dashboard, Manage-password (Google), Pydantic-typed MbtiScores.
-- 2026-04-28 — Iter 5: Strict Mirror system prompt (clarify → mirror → reality-check → 🎯 Next Move). Behavior signals fed from journal items (entries / completed / open / overdue / days-since / top moods). Top-3-goal parsing. Reality-engine + drift detection. Mood-aware tone shift. Cheap regex mood inference (no extra LLM round-trip).
+- 2026-04-28 Iter 1: auth + voice/text journal + Whisper + GPT-5.2 categorize + recap (Gemini 3 Flash)
+- 2026-04-28 Iter 2: profile builder, MBTI test, AI personality analyzer, AI chat, daily reflection
+- 2026-04-28 Iter 3: privacy-first abstraction (local IDB audio), monthly cloud-sync modal, stateless AI endpoints
+- 2026-04-28 Iter 4: mood emoji burst, super admin auto-promote, Admin dashboard, Pydantic MbtiScores
+- 2026-04-28 Iter 5: strict Mirror system prompt with drift/reality engine + missions (3 active cap, tracks, auto-detected progress, mission stats injected into chat prompt)
+- 2026-04-28 **Iter 6** — P1+P2 batch:
+  - **Streaming chat replies** via SSE (litellm.acompletion stream) for both cloud + stateless
+  - **Search** across journal + chat (UI page /search; debounced; highlight)
+  - **Native push reminders** (foreground Notifications API + permission banner)
+  - **Big Five (OCEAN)** assessment + result page; chooser between MBTI and Big Five
+  - **Mood-over-time chart** (recharts area chart on /profile, day-aggregated, mood-coloured dots)
+  - **Reminder snooze** (10m / 1h / tomorrow / next week dropdown on TimelineItem)
+  - **Bidirectional local↔cloud sync** (`/sync/import` & `/sync/export`; cloud→local download in Privacy)
+  - **Admin audit log** (collection + UI section; logs role changes + user deletions)
+  - StorageContext now gates children until pref loaded — fixes prior local/cloud race
 
 ## Backlog
-- P1: Streaming chat replies; search across journal+chat; native push reminders; admin audit log
-- P2: Big Five v2; mood-over-time chart; reminder snooze; bidirectional local↔cloud sync
 - P2: Move Mirror prompt to /app/backend/prompts/mirror_chat.md for cleaner diffs
 - P2: Mongo $facet aggregation for behavior signals once user content scales
 - P2: Subscription / premium tier
+- P2: Service-worker push reminders (background, even when tab closed)
+- P2: Split server.py into modules (auth, journal, ai, personality, missions, admin, sync) — currently 2200+ lines
+- P2: Migrate FastAPI on_event to lifespan

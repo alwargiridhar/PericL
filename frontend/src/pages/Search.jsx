@@ -101,9 +101,11 @@ export default function SearchPage() {
                 ) : busy && total === 0 ? (
                     <p className="text-sm text-muted-foreground py-12 text-center">Searching…</p>
                 ) : total === 0 ? (
-                    <p className="text-sm text-muted-foreground py-12 text-center" data-testid="search-empty">
-                        Nothing here for &ldquo;{q.trim()}&rdquo;.
-                    </p>
+                    <div data-testid="search-results">
+                        <p className="text-sm text-muted-foreground py-12 text-center" data-testid="search-empty">
+                            Nothing here for &ldquo;{q.trim()}&rdquo;.
+                        </p>
+                    </div>
                 ) : (
                     <div className="space-y-6" data-testid="search-results">
                         {!!results.journal?.length && (

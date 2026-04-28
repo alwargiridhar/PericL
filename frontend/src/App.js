@@ -13,6 +13,7 @@ import PersonalityAssessment from "@/pages/PersonalityAssessment";
 import PersonalityResult from "@/pages/PersonalityResult";
 import DailyPrompt from "@/pages/DailyPrompt";
 import Privacy from "@/pages/Privacy";
+import Admin from "@/pages/Admin";
 
 function AppRouter() {
     const location = useLocation();
@@ -29,6 +30,7 @@ function AppRouter() {
             <Route path="/personality/result/:id" element={<ProtectedRoute><PersonalityResult /></ProtectedRoute>} />
             <Route path="/daily-prompt" element={<ProtectedRoute><DailyPrompt /></ProtectedRoute>} />
             <Route path="/privacy" element={<ProtectedRoute><Privacy /></ProtectedRoute>} />
+            <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
             <Route path="*" element={<Login />} />
         </Routes>
     );

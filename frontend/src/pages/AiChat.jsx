@@ -15,8 +15,10 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { chat as chatStore, profile as profileStore, personality as personalityStore } from "@/lib/storage";
+import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import Footer from "@/components/Footer";
+import MoodEmojiBurst from "@/components/MoodEmojiBurst";
 
 function fmtTime(iso) {
     return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -30,6 +32,8 @@ export default function AiChat() {
     const [loading, setLoading] = useState(false);
     const [profile, setProfile] = useState(null);
     const [personality, setPersonality] = useState(null);
+    const [mood, setMood] = useState(null);
+    const [moodTrigger, setMoodTrigger] = useState(0);
     const endRef = useRef(null);
 
     useEffect(() => {
@@ -63,6 +67,19 @@ export default function AiChat() {
             created_at: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, optimistic]);
+
+        // Detect mood from user's message in parallel — for the floating emoji burst.
+        api
+            .post("/ai/categorize", { text: t })
+            .then((r) => {
+                const m = r.data?.mood || null;
+                if (m) {
+                    setMood(m);
+                    setMoodTrigger((n) => n + 1);
+                }
+            })
+            .catch(() => {});
+
         try {
             const data = await chatStore.send(t);
             const { user_message, assistant_message } = data;
@@ -95,6 +112,7 @@ export default function AiChat() {
     return (
         <div className="flex flex-col min-h-screen bg-background text-foreground">
             <Toaster position="top-center" richColors />
+            <MoodEmojiBurst trigger={moodTrigger} mood={mood} />
 
             <header className="sticky top-0 z-30 backdrop-blur-xl bg-background/80 border-b border-border/60">
                 <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">

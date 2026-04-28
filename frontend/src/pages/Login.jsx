@@ -44,7 +44,12 @@ export default function Login() {
                     <div className="w-10 h-10 rounded-2xl bg-primary text-primary-foreground grid place-items-center font-display font-medium text-lg">
                         P
                     </div>
-                    <span className="font-display text-xl tracking-tight">PericL</span>
+                    <div className="leading-tight">
+                        <div className="font-display text-xl tracking-tight">PericL</div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            Personal Voice Journal
+                        </div>
+                    </div>
                 </div>
 
                 <h1 className="font-display text-4xl sm:text-6xl tracking-tight font-medium leading-[1.05]">
@@ -97,7 +102,7 @@ export default function Login() {
 function FooterLogin() {
     return (
         <div className="absolute bottom-3 inset-x-0 text-center text-[11px] text-muted-foreground z-10">
-            © {new Date().getFullYear()} Giridhar Alwar · PericL
+            © {new Date().getFullYear()} Giridhar Alwar · PericL · Personal Voice Journal
         </div>
     );
 }

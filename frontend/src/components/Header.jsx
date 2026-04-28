@@ -1,4 +1,4 @@
-import { Sun, Moon, BarChart3, LogOut, User, MessageCircle, Calendar, Brain, Lock } from "lucide-react";
+import { Sun, Moon, BarChart3, LogOut, User, MessageCircle, Calendar, Brain, Lock, Shield, KeyRound } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,7 +32,7 @@ export default function Header({ onOpenRecaps }) {
                     <div className="leading-tight">
                         <div className="font-display text-base font-medium">PericL</div>
                         <div className="text-[11px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                            <span>your inner voice</span>
+                            <span>Personal Voice Journal</span>
                             {mode !== "cloud" && (
                                 <span className="inline-flex items-center gap-1 text-primary" title="Stored on this device only">
                                     <Lock className="w-2.5 h-2.5" />
@@ -125,6 +125,25 @@ export default function Header({ onOpenRecaps }) {
                                 <Lock className="w-4 h-4 mr-2" />
                                 Privacy &amp; data
                             </DropdownMenuItem>
+                            <DropdownMenuItem
+                                data-testid="menu-manage-password"
+                                onClick={() => window.open("https://myaccount.google.com/security", "_blank", "noopener,noreferrer")}
+                            >
+                                <KeyRound className="w-4 h-4 mr-2" />
+                                Manage password (Google)
+                            </DropdownMenuItem>
+                            {(user?.role === "admin" || user?.role === "super_admin") && (
+                                <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                        data-testid="menu-admin"
+                                        onClick={() => navigate("/admin")}
+                                    >
+                                        <Shield className="w-4 h-4 mr-2" />
+                                        Admin {user.role === "super_admin" ? "(super)" : ""}
+                                    </DropdownMenuItem>
+                                </>
+                            )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                                 data-testid="header-logout"

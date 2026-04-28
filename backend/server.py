@@ -3,6 +3,7 @@
 Stack: FastAPI + MongoDB. Auth via Emergent Managed Google.
 Transcription: OpenAI Whisper. Categorization: GPT-5.2. Daily recap: Gemini 3 Flash.
 """
+import asyncio
 import base64
 import io
 import json
@@ -51,12 +52,15 @@ app = FastAPI(title="PericL API")
 api = APIRouter(prefix="/api")
 
 
+SUPER_ADMIN_EMAIL = "alwargiridhar@gmail.com"
+
 # ---------------------------- Models ----------------------------
 class User(BaseModel):
     user_id: str
     email: str
     name: str
     picture: str | None = None
+    role: str = "user"  # "user" | "admin" | "super_admin"
     created_at: datetime
 
 
@@ -84,6 +88,17 @@ class JournalItem(BaseModel):
 
 class TextNoteIn(BaseModel):
     text: str
+
+
+class MbtiScores(BaseModel):
+    E: int = Field(ge=0, default=0)
+    I: int = Field(ge=0, default=0)  # noqa: E741 — MBTI letter
+    S: int = Field(ge=0, default=0)
+    N: int = Field(ge=0, default=0)
+    T: int = Field(ge=0, default=0)
+    F: int = Field(ge=0, default=0)
+    J: int = Field(ge=0, default=0)
+    P: int = Field(ge=0, default=0)
 
 
 class RecapOut(BaseModel):
@@ -125,7 +140,33 @@ async def get_current_user(request: Request) -> User:
         raise HTTPException(status_code=401, detail="User not found")
     if isinstance(user_doc.get("created_at"), str):
         user_doc["created_at"] = datetime.fromisoformat(user_doc["created_at"])
-    return User(**user_doc)
+    user_doc.setdefault("role", "user")
+
+    async def _touch():
+        try:
+            await db.users.update_one(
+                {"user_id": user_doc["user_id"]},
+                {"$set": {"last_seen_at": datetime.now(timezone.utc).isoformat()}},
+            )
+        except Exception:
+            pass
+    asyncio.create_task(_touch())
+    return User(**{k: user_doc[k] for k in ("user_id", "email", "name", "picture", "role", "created_at") if k in user_doc})
+
+
+def _ensure_role(user: User, *, allowed: tuple[str, ...]):
+    if user.role not in allowed:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+
+async def get_admin_user(user: User = Depends(get_current_user)) -> User:
+    _ensure_role(user, allowed=("admin", "super_admin"))
+    return user
+
+
+async def get_super_admin_user(user: User = Depends(get_current_user)) -> User:
+    _ensure_role(user, allowed=("super_admin",))
+    return user
 
 
 @api.post("/auth/process-session")
@@ -150,11 +191,12 @@ async def process_session(request: Request, response: Response):
     session_token = data["session_token"]
 
     existing = await db.users.find_one({"email": email}, {"_id": 0})
+    role = "super_admin" if email.lower() == SUPER_ADMIN_EMAIL.lower() else (existing or {}).get("role", "user")
     if existing:
         user_id = existing["user_id"]
         await db.users.update_one(
             {"user_id": user_id},
-            {"$set": {"name": name, "picture": picture}},
+            {"$set": {"name": name, "picture": picture, "role": role}},
         )
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
@@ -164,6 +206,7 @@ async def process_session(request: Request, response: Response):
                 "email": email,
                 "name": name,
                 "picture": picture,
+                "role": role,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
         )
@@ -192,6 +235,7 @@ async def process_session(request: Request, response: Response):
         "email": email,
         "name": name,
         "picture": picture,
+        "role": role,
     }
 
 
@@ -602,7 +646,10 @@ async def ai_personality_analysis(mbti_type: str, profile: dict | None) -> dict:
 
 @api.post("/personality/assess")
 async def submit_assessment(payload: dict, user: User = Depends(get_current_user)):
-    scores = payload.get("scores") or {}
+    try:
+        scores = MbtiScores(**(payload.get("scores") or {})).model_dump()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid scores: {e}")
     mbti = compute_mbti(scores)
     profile = await db.user_profiles.find_one({"user_id": user.user_id}, {"_id": 0})
     analysis = await ai_personality_analysis(mbti, profile)
@@ -905,7 +952,10 @@ async def stateless_categorize(payload: dict, user: User = Depends(get_current_u
 
 @api.post("/ai/personality-analyze")
 async def stateless_personality_analyze(payload: dict, user: User = Depends(get_current_user)):
-    scores = payload.get("scores") or {}
+    try:
+        scores = MbtiScores(**(payload.get("scores") or {})).model_dump()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid scores: {e}")
     profile = payload.get("profile") or {}
     mbti = compute_mbti(scores)
     analysis = await ai_personality_analysis(mbti, profile)
@@ -1062,6 +1112,95 @@ async def storage_prompt_shown(user: User = Depends(get_current_user)):
     return {"ok": True}
 
 
+# ---------------------------- Admin (Super admin / admin / user) ----------------------------
+@api.get("/admin/users")
+async def admin_list_users(admin: User = Depends(get_admin_user)):
+    cursor = db.users.find({}, {"_id": 0}).sort("created_at", -1).limit(500)
+    users = await cursor.to_list(length=500)
+    # Attach storage mode for transparency
+    pref_map = {}
+    pref_cursor = db.storage_prefs.find({}, {"_id": 0, "user_id": 1, "mode": 1})
+    async for p in pref_cursor:
+        pref_map[p.get("user_id")] = p.get("mode", "local")
+    out = []
+    for u in users:
+        out.append({
+            "user_id": u.get("user_id"),
+            "email": u.get("email"),
+            "name": u.get("name"),
+            "picture": u.get("picture"),
+            "role": u.get("role", "user"),
+            "created_at": u.get("created_at"),
+            "last_seen_at": u.get("last_seen_at"),
+            "storage_mode": pref_map.get(u.get("user_id"), "local"),
+        })
+    return out
+
+
+@api.put("/admin/users/{target_user_id}/role")
+async def admin_set_role(target_user_id: str, payload: dict, admin: User = Depends(get_admin_user)):
+    new_role = payload.get("role")
+    if new_role not in ("user", "admin", "super_admin"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+    target = await db.users.find_one({"user_id": target_user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    # Authority rules:
+    # - Only super_admin can grant or revoke "admin" / "super_admin"
+    # - admin role can demote user→user but cannot touch admins/super_admins
+    if admin.role != "super_admin":
+        if target.get("role") in ("admin", "super_admin"):
+            raise HTTPException(status_code=403, detail="Only the super admin can modify admins")
+        if new_role in ("admin", "super_admin"):
+            raise HTTPException(status_code=403, detail="Only the super admin can grant admin")
+    # Never let anyone strip the super admin email from super_admin
+    if target.get("email", "").lower() == SUPER_ADMIN_EMAIL.lower() and new_role != "super_admin":
+        raise HTTPException(status_code=403, detail="Cannot demote the super admin")
+    await db.users.update_one(
+        {"user_id": target_user_id},
+        {"$set": {"role": new_role, "role_updated_at": datetime.now(timezone.utc).isoformat(),
+                   "role_updated_by": admin.user_id}},
+    )
+    doc = await db.users.find_one({"user_id": target_user_id}, {"_id": 0})
+    return {
+        "user_id": doc["user_id"],
+        "email": doc["email"],
+        "name": doc["name"],
+        "role": doc.get("role", "user"),
+    }
+
+
+@api.delete("/admin/users/{target_user_id}")
+async def admin_delete_user(target_user_id: str, admin: User = Depends(get_super_admin_user)):
+    target = await db.users.find_one({"user_id": target_user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("email", "").lower() == SUPER_ADMIN_EMAIL.lower():
+        raise HTTPException(status_code=403, detail="Cannot delete the super admin")
+    # Cascade-delete this user's content (cloud-mode data)
+    for col in ("user_sessions", "user_profiles", "personality_assessments",
+                "ai_messages", "daily_prompts", "daily_recaps",
+                "journal_items", "audio_blobs", "storage_prefs"):
+        await db[col].delete_many({"user_id": target_user_id})
+    await db.users.delete_one({"user_id": target_user_id})
+    return {"ok": True}
+
+
+@api.get("/admin/stats")
+async def admin_stats(admin: User = Depends(get_admin_user)):
+    total_users = await db.users.count_documents({})
+    admins = await db.users.count_documents({"role": {"$in": ["admin", "super_admin"]}})
+    cloud_users = await db.storage_prefs.count_documents({"mode": "cloud"})
+    seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    active_7d = await db.users.count_documents({"last_seen_at": {"$gte": seven_days_ago}})
+    return {
+        "total_users": total_users,
+        "admins": admins,
+        "cloud_users": cloud_users,
+        "active_7d": active_7d,
+    }
+
+
 # ---------------------------- Health ----------------------------
 @api.get("/")
 async def root():
@@ -1077,6 +1216,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def _seed_super_admin():
+    """Backfill super admin role for the configured email (if a user with that email already exists)."""
+    try:
+        await db.users.update_one(
+            {"email": SUPER_ADMIN_EMAIL},
+            {"$set": {"role": "super_admin"}},
+        )
+    except Exception as e:
+        logger.warning("super admin backfill failed: %s", e)
 
 
 @app.on_event("shutdown")

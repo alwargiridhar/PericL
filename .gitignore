@@ -76,6 +76,7 @@ agenthub/agents/youtube/db
 # Build caches
 .cache/
 
+memory/test_credentials.md
 memory/test_credentials_disabled.md
 
 # Mobile development

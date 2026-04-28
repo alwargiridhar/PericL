@@ -698,14 +698,41 @@ def _parse_top_goals(goals_text: str | None) -> list[str]:
     if len(lines) < 2:
         # try splitting by sentence
         lines = [s.strip() for s in re.split(r"(?<=[.!?])\s+", goals_text) if s.strip()]
+    seen: set[str] = set()
     cleaned: list[str] = []
     for ln in lines:
         ln = re.sub(r"^[\-•\*\d\.\)\s]+", "", ln).strip()
-        if ln:
-            cleaned.append(ln[:160])
+        if not ln:
+            continue
+        norm = re.sub(r"[^a-z0-9]+", " ", ln.lower()).strip()
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        cleaned.append(ln[:160])
         if len(cleaned) >= 3:
             break
     return cleaned
+
+
+def _infer_mood_quick(text: str) -> str | None:
+    """Cheap keyword-based mood detector (kept in sync with frontend _inferMoodLocal).
+    Used to avoid a doubled LLM round-trip on every chat message."""
+    if not text:
+        return None
+    t = text.lower()
+    if re.search(r"!!|🎉|amazing|incredible|stoked|let'?s go|finally|shipped|launch", t):
+        return "excited"
+    if re.search(r"happy|grateful|joy|love|blessed|smile|good day|win|proud", t):
+        return "happy"
+    if re.search(r"stress|overwhelm|anxious|panic|deadline|too much|burn(ed|t)? out", t):
+        return "stressed"
+    if re.search(r"sad|down|cry|lonely|miss|hurt|alone|tired", t):
+        return "sad"
+    if re.search(r"calm|peaceful|breathe|quiet|still|relax", t):
+        return "calm"
+    if re.search(r"focus|plan|ship|build|goal|priorit|launch|strateg", t):
+        return "focused"
+    return None
 
 
 def _compute_behavior_signals_from_items(items: list[dict]) -> dict:
@@ -907,13 +934,9 @@ async def chat_send(payload: dict, user: User = Depends(get_current_user)):
     ).sort("created_at", -1).to_list(length=400)
     behavior = _compute_behavior_signals_from_items(items_for_signals)
 
-    # Detect current mood from this message (best-effort, JSON output already)
-    current_mood = None
-    try:
-        ai_quick = await categorize(message)
-        current_mood = (ai_quick or {}).get("mood")
-    except Exception:
-        pass
+    # Detect current mood from this message via cheap heuristic — avoids
+    # a second LLM round-trip per chat send (saves ~3-6s).
+    current_mood = _infer_mood_quick(message)
 
     sys_msg = _build_chat_system_message(
         profile, personality_doc, moods, behavior=behavior, current_mood=current_mood

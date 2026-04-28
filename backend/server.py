@@ -2209,25 +2209,45 @@ async def admin_audit_log(limit: int = 100, admin: User = Depends(get_admin_user
 
 app.include_router(api)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+# CORS — allow_credentials with allow_origins=["*"] is invalid per the spec.
+# Use allow_origin_regex when CORS_ORIGINS is "*" so the response echoes the
+# request origin (required for cookie-based auth + SSE with credentials:'include').
+_cors_origins_raw = os.environ.get("CORS_ORIGINS", "*").strip()
+if _cors_origins_raw in ("*", ""):
+    app.add_middleware(
+        CORSMiddleware,
+        allow_credentials=True,
+        allow_origin_regex=".*",
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_credentials=True,
+        allow_origins=[o.strip() for o in _cors_origins_raw.split(",") if o.strip()],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.on_event("startup")
 async def _seed_super_admin():
-    """Backfill super admin role for the configured email (if a user with that email already exists)."""
-    try:
-        await db.users.update_one(
-            {"email": SUPER_ADMIN_EMAIL},
-            {"$set": {"role": "super_admin"}},
-        )
-    except Exception as e:
-        logger.warning("super admin backfill failed: %s", e)
+    """Backfill super admin role for the configured email — fire-and-forget.
+
+    Runs in the background so the readiness probe never waits on the first
+    Mongo round-trip (Atlas SRV resolution can take a few seconds on cold start).
+    """
+    async def _run():
+        try:
+            await db.users.update_one(
+                {"email": SUPER_ADMIN_EMAIL},
+                {"$set": {"role": "super_admin"}},
+            )
+        except Exception as e:
+            logger.warning("super admin backfill failed: %s", e)
+    asyncio.create_task(_run())
 
 
 @app.on_event("shutdown")

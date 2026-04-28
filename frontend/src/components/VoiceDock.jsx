@@ -75,7 +75,7 @@ export default function VoiceDock({ onSave, mode, setMode, onSendText, busy }) {
                     <TextDock onSend={onSendText} setMode={setMode} busy={busy} />
                 )}
                 <p className="text-[11px] text-center text-muted-foreground mt-3">
-                    PericL listens privately. Your entries stay yours.
+                    Stays on your device. Your private inner voice.
                 </p>
             </div>
         </div>

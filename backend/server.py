@@ -211,17 +211,17 @@ async def logout(request: Request, response: Response):
 
 # ---------------------------- AI helpers ----------------------------
 CATEGORIZATION_SYSTEM = (
-    "You are PericL, a personal voice-journal AI. The user just spoke or typed a thought. "
-    "Read it carefully and extract structured items. Return ONLY a JSON object with this shape: "
-    '{"summary": str (1 short sentence summarizing what the user said), '
+    "You are the user's quiet inner voice — their private mirror. They just spoke or typed a thought to themselves. "
+    "Read it as if it were your own thought. Return ONLY a JSON object with this shape: "
+    '{"summary": str (1 short sentence summarizing what they said, written second-person warmly), '
     '"mood": one of ["calm","happy","stressed","sad","excited","focused","neutral"], '
     '"items": [ { "type": "task" | "reminder" | "idea" | "note", "title": str, '
     '"priority": "low"|"medium"|"high", "due_at": ISO8601 or null } ] } . '
     "Rules: extract distinct actionable units. A 'reminder' has a date/time the user wants to be reminded. "
     "A 'task' is a TODO with no specific time. An 'idea' is a thought worth saving. "
     "If the message is purely emotional/reflective, return items=[] (it remains a journal note). "
-    "If user says 'tomorrow at 6pm', resolve to ISO8601 in UTC based on the provided current_time. "
-    "Keep titles concise (max 80 chars). NEVER include text outside JSON."
+    "If they say 'tomorrow at 6pm', resolve to ISO8601 in UTC based on the provided current_time. "
+    "Keep titles concise (max 80 chars). NEVER include text outside JSON. NEVER mention being an assistant or AI."
 )
 
 
@@ -481,9 +481,9 @@ async def make_recap(user: User = Depends(get_current_user)):
         api_key=EMERGENT_LLM_KEY,
         session_id=f"recap-{user.user_id}-{day_start.date().isoformat()}",
         system_message=(
-            "You are PericL's reflective daily-recap voice. Read the user's day notes "
-            "and produce a warm, 4-6 sentence recap summarizing themes, mood and key intents. "
-            "Be specific, kind, and second-person ('you'). No bullet points. Plain text."
+            "You are the user's own reflective voice — read their day's notes and write a 4-6 sentence recap "
+            "speaking AS them, TO them. Warm, second-person, specific. No bullet points. Plain text. "
+            "Never mention being an AI or assistant."
         ),
     ).with_model("gemini", "gemini-3-flash-preview")
     try:
@@ -578,10 +578,11 @@ async def ai_personality_analysis(mbti_type: str, profile: dict | None) -> dict:
     goals = (profile or {}).get("goals") or "(not provided)"
     challenges = (profile or {}).get("challenges") or "(not provided)"
     sys = (
-        "You are a warm, evidence-based MBTI coach. Given a personality type and (optional) profile, "
-        "return ONLY JSON: {\"description\": str (2-3 sentences, second-person warm voice), "
-        "\"strengths\": [str, str, str, str] (concise), "
-        "\"growth_areas\": [str, str, str, str] (concise, framed positively) }"
+        "You are the user's own reflective voice writing back to them. Given a personality type and (optional) profile, "
+        "return ONLY JSON: {\"description\": str (2-3 sentences in second-person warm voice, as if they are reading their own self-portrait), "
+        "\"strengths\": [str, str, str, str] (concise, framed as 'You are...' qualities), "
+        "\"growth_areas\": [str, str, str, str] (concise, framed as gentle pushes from yourself, NOT criticisms) }. "
+        "Never mention being an AI or assistant."
     )
     chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"mbti-{uuid.uuid4().hex[:8]}", system_message=sys).with_model("openai", "gpt-5.2")
     msg = UserMessage(text=f"MBTI: {mbti_type} ({MBTI_NAMES.get(mbti_type, '')})\nName: {name}\nGoals: {goals}\nChallenges: {challenges}")
@@ -643,29 +644,31 @@ async def get_assessment(assessment_id: str, user: User = Depends(get_current_us
 # ---------------------------- AI Chat (Personal Assistant + Friend) ----------------------------
 def _build_chat_system_message(profile: dict | None, personality: dict | None, recent_moods: list[str]) -> str:
     parts = [
-        "You are PericL — a warm, perceptive personal assistant + thoughtful friend, all in one.",
-        "Be direct yet kind, curious, never preachy. Match the user's energy and reading level.",
-        "Use short paragraphs, no markdown headings. Avoid emojis unless the user uses them first.",
-        "When useful, ask one focused follow-up question. Help users reflect, plan, or just feel heard.",
+        "You are not an assistant. You are the user's own inner voice — a calm, slightly-ahead version of themselves they're talking with.",
+        "Speak AS them, TO them. Mirror their tone, energy, vocabulary, and emotional stability. Never say 'I' as if you were external — speak in second-person reflective voice ('You felt...', 'You could...').",
+        "NEVER say 'I am an AI', 'as an AI', 'as an assistant'. You are simply the user, written down.",
+        "Your role: push them toward THEIR stated goals (especially profile/aspirations); call out their patterns; help find monetization paths or career strategy where relevant; protect their values.",
+        "Be direct, honest, and kind — like the inner voice that already knows them. No preachy advice. Short paragraphs. One focused follow-up question when useful.",
     ]
     if profile:
         bits = []
-        for f in ("name", "age", "occupation", "goals", "challenges", "core_values", "aspirations"):
+        for f in ("name", "age", "occupation", "goals", "challenges", "core_values", "aspirations",
+                  "personality_traits", "communication_style", "energy_level", "motivation_triggers"):
             v = profile.get(f)
             if v:
                 bits.append(f"{f}: {v}")
         if bits:
-            parts.append("\nUser profile snapshot:\n- " + "\n- ".join(bits))
+            parts.append("\nYour own profile (these are YOUR facts):\n- " + "\n- ".join(bits))
     if personality:
         pt = personality.get("personality_type")
         if pt:
             parts.append(
-                f"\nMBTI type: {pt} ({personality.get('type_name','')}). "
-                f"Mirror their communication style. Strengths: {', '.join(personality.get('strengths') or [])[:300]}. "
-                f"Growth areas (be gentle): {', '.join(personality.get('growth_areas') or [])[:300]}."
+                f"\nYour MBTI: {pt} ({personality.get('type_name','')}). "
+                f"Your strengths: {', '.join(personality.get('strengths') or [])[:300]}. "
+                f"Your growth areas: {', '.join(personality.get('growth_areas') or [])[:300]}."
             )
     if recent_moods:
-        parts.append("\nRecent moods (most recent first): " + ", ".join(recent_moods[:5]))
+        parts.append("\nYour recent moods (most recent first): " + ", ".join(recent_moods[:5]))
     return "\n".join(parts)
 
 
@@ -872,6 +875,185 @@ async def daily_prompt_history(user: User = Depends(get_current_user)):
 @api.delete("/daily-prompts/{prompt_id}")
 async def delete_daily_prompt(prompt_id: str, user: User = Depends(get_current_user)):
     await db.daily_prompts.delete_one({"id": prompt_id, "user_id": user.user_id})
+    return {"ok": True}
+
+
+# ---------------------------- Stateless AI (for local-first / private mode) ----------------------------
+# These endpoints run AI without persisting any user content server-side.
+# Caller passes everything; server returns AI output only.
+
+@api.post("/ai/transcribe")
+async def stateless_transcribe(
+    audio: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+):
+    audio_bytes = await audio.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio")
+    text = await transcribe_audio(audio_bytes, audio.filename or "audio.webm")
+    return {"text": text}
+
+
+@api.post("/ai/categorize")
+async def stateless_categorize(payload: dict, user: User = Depends(get_current_user)):
+    text = (payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Empty text")
+    ai = await categorize(text)
+    return ai
+
+
+@api.post("/ai/personality-analyze")
+async def stateless_personality_analyze(payload: dict, user: User = Depends(get_current_user)):
+    scores = payload.get("scores") or {}
+    profile = payload.get("profile") or {}
+    mbti = compute_mbti(scores)
+    analysis = await ai_personality_analysis(mbti, profile)
+    return {
+        "personality_type": mbti,
+        "type_name": MBTI_NAMES.get(mbti, ""),
+        "description": analysis.get("description", ""),
+        "strengths": analysis.get("strengths", []),
+        "growth_areas": analysis.get("growth_areas", []),
+        "scores": {k: int(scores.get(k, 0)) for k in "EISNTFJP"},
+    }
+
+
+@api.post("/ai/chat-stateless")
+async def stateless_chat(payload: dict, user: User = Depends(get_current_user)):
+    """Caller passes full context: history (last N), profile, personality, recent_moods, message."""
+    message = (payload.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Empty message")
+    history = payload.get("history") or []  # list of {role,content}
+    profile = payload.get("profile") or None
+    personality = payload.get("personality") or None
+    moods = payload.get("recent_moods") or []
+
+    sys_msg = _build_chat_system_message(profile, personality, moods)
+    convo = ""
+    for m in history[-16:]:
+        prefix = "User" if m.get("role") == "user" else "PericL"
+        convo += f"{prefix}: {m.get('content','')}\n"
+    convo += f"User: {message}"
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"chat-stateless-{uuid.uuid4().hex[:8]}",
+        system_message=sys_msg,
+    ).with_model("openai", "gpt-5.2")
+    try:
+        reply = (await chat.send_message(UserMessage(text=convo))).strip()
+    except Exception as e:
+        logger.warning("stateless chat error: %s", e)
+        reply = "Take a breath. Try that again in a moment."
+    return {"reply": reply}
+
+
+@api.post("/ai/recap-stateless")
+async def stateless_recap(payload: dict, user: User = Depends(get_current_user)):
+    items = payload.get("items") or []
+    bullet_lines = []
+    for v in items[:30]:
+        line = v.get("transcription") or v.get("detail") or v.get("title") or ""
+        if line:
+            bullet_lines.append(f"- {line[:240]}")
+    transcript_blob = "\n".join(bullet_lines) or "(no detailed entries)"
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"recap-stateless-{uuid.uuid4().hex[:8]}",
+        system_message=(
+            "You are the user's own reflective voice — read their day's notes and write a 4-6 sentence recap "
+            "speaking AS them, TO them. Warm, second-person, specific. No bullet points. Plain text. "
+            "Never mention being an AI or assistant."
+        ),
+    ).with_model("gemini", "gemini-3-flash-preview")
+    try:
+        summary = (await chat.send_message(UserMessage(text=transcript_blob))).strip()
+    except Exception as e:
+        logger.warning("stateless recap error: %s", e)
+        summary = "Today you captured a few thoughts. Keep going — small entries compound into a clearer mind."
+    return {"summary": summary}
+
+
+@api.get("/ai/daily-prompt-pick")
+async def stateless_pick_prompt(personality_type: str | None = None, user: User = Depends(get_current_user)):
+    return _select_prompt(personality_type)
+
+
+# ---------------------------- Storage Preference (Privacy mode) ----------------------------
+# Per-user setting that controls whether we persist user CONTENT server-side.
+# Modes: "local" (default — server only stores identity + this pref), "cloud" (full sync), "never" (no monthly nudge).
+
+DEFAULT_STORAGE_MODE = "local"
+PROMPT_INTERVAL_DAYS = 30
+
+
+@api.get("/storage/pref")
+async def get_storage_pref(user: User = Depends(get_current_user)):
+    doc = await db.storage_prefs.find_one({"user_id": user.user_id}, {"_id": 0})
+    if not doc:
+        now = datetime.now(timezone.utc)
+        doc = {
+            "user_id": user.user_id,
+            "mode": DEFAULT_STORAGE_MODE,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+            "last_prompt_at": None,
+            "next_prompt_at": (now + timedelta(days=PROMPT_INTERVAL_DAYS)).isoformat(),
+        }
+        await db.storage_prefs.insert_one(dict(doc))
+        doc.pop("_id", None)
+    # decide if we should show the monthly modal now
+    show_now = False
+    if doc.get("mode") in ("local",):
+        npa = parse_dt(doc.get("next_prompt_at"))
+        if not npa or npa <= datetime.now(timezone.utc):
+            show_now = True
+    return {**doc, "should_prompt_now": show_now}
+
+
+@api.put("/storage/pref")
+async def set_storage_pref(payload: dict, user: User = Depends(get_current_user)):
+    mode = payload.get("mode")
+    if mode not in ("local", "cloud", "never"):
+        raise HTTPException(status_code=400, detail="Invalid mode")
+    now = datetime.now(timezone.utc)
+    update = {
+        "user_id": user.user_id,
+        "mode": mode,
+        "updated_at": now.isoformat(),
+        "last_prompt_at": now.isoformat() if payload.get("from_prompt") else None,
+    }
+    if mode == "never":
+        update["next_prompt_at"] = None
+    elif mode == "local":
+        update["next_prompt_at"] = (now + timedelta(days=PROMPT_INTERVAL_DAYS)).isoformat()
+    else:  # cloud — no monthly nudge needed
+        update["next_prompt_at"] = None
+    await db.storage_prefs.update_one(
+        {"user_id": user.user_id},
+        {"$set": update, "$setOnInsert": {"created_at": now.isoformat()}},
+        upsert=True,
+    )
+    doc = await db.storage_prefs.find_one({"user_id": user.user_id}, {"_id": 0})
+    return doc
+
+
+@api.post("/storage/prompt-shown")
+async def storage_prompt_shown(user: User = Depends(get_current_user)):
+    """Called when the monthly modal was shown but user dismissed (snoozed) it."""
+    now = datetime.now(timezone.utc)
+    await db.storage_prefs.update_one(
+        {"user_id": user.user_id},
+        {"$set": {
+            "last_prompt_at": now.isoformat(),
+            "next_prompt_at": (now + timedelta(days=PROMPT_INTERVAL_DAYS)).isoformat(),
+            "updated_at": now.isoformat(),
+        }, "$setOnInsert": {"user_id": user.user_id, "mode": "local", "created_at": now.isoformat()}},
+        upsert=True,
+    )
     return {"ok": True}
 
 

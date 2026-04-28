@@ -4,7 +4,8 @@ import { ArrowLeft, Sparkles, Calendar, CheckCircle2, MessageCircle, Trash2 } fr
 import { Toaster, toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
+import { prompt as promptStore } from "@/lib/storage";
+import Footer from "@/components/Footer";
 
 function fmtDate(iso) {
     return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -26,12 +27,12 @@ export default function DailyPrompt() {
         (async () => {
             try {
                 const [t, h] = await Promise.all([
-                    api.get("/daily-prompt"),
-                    api.get("/daily-prompts/history"),
+                    promptStore.today(),
+                    promptStore.history(),
                 ]);
-                setToday(t.data);
-                setResponse(t.data?.response_text || "");
-                setHistory(h.data || []);
+                setToday(t);
+                setResponse(t?.response_text || "");
+                setHistory(h || []);
             } finally {
                 setLoading(false);
             }
@@ -42,10 +43,10 @@ export default function DailyPrompt() {
         if (!response.trim()) return;
         setSubmitting(true);
         try {
-            const r = await api.post("/daily-prompt/respond", { response: response.trim() });
-            setToday(r.data);
-            const h = await api.get("/daily-prompts/history");
-            setHistory(h.data || []);
+            const updated = await promptStore.respond(response.trim());
+            setToday(updated);
+            const h = await promptStore.history();
+            setHistory(h || []);
             toast.success("Reflection saved");
         } catch {
             toast.error("Could not save reflection");
@@ -56,7 +57,7 @@ export default function DailyPrompt() {
 
     const remove = async (id) => {
         try {
-            await api.delete(`/daily-prompts/${id}`);
+            await promptStore.delete(id);
             setHistory((h) => h.filter((p) => p.id !== id));
             toast.success("Removed");
         } catch {
@@ -174,7 +175,7 @@ export default function DailyPrompt() {
                                     className="w-full rounded-full h-11"
                                 >
                                     <MessageCircle className="w-4 h-4 mr-2" />
-                                    Discuss with PericL
+                                    Talk it through with yourself
                                 </Button>
                             </div>
                         )}
@@ -238,6 +239,7 @@ export default function DailyPrompt() {
                     </div>
                 )}
             </main>
+            <Footer />
         </div>
     );
 }

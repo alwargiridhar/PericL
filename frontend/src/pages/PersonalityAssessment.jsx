@@ -5,7 +5,7 @@ import { toast, Toaster } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { mbtiQuestions } from "@/data/mbti-questions";
-import { api } from "@/lib/api";
+import { personality as personalityStore } from "@/lib/storage";
 
 export default function PersonalityAssessment() {
     const navigate = useNavigate();
@@ -28,8 +28,8 @@ export default function PersonalityAssessment() {
         try {
             const scores = { E: 0, I: 0, S: 0, N: 0, T: 0, F: 0, J: 0, P: 0 };
             Object.values(answers).forEach((s) => (scores[s] = (scores[s] || 0) + 1));
-            const r = await api.post("/personality/assess", { scores });
-            navigate(`/personality/result/${r.data.id}`, { replace: true });
+            const r = await personalityStore.assess(scores);
+            navigate(`/personality/result/${r.id}`, { replace: true });
         } catch {
             toast.error("Could not submit. Try again.");
         } finally {

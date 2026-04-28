@@ -1,4 +1,4 @@
-import { Sun, Moon, BarChart3, LogOut, User, MessageCircle, Calendar, Brain } from "lucide-react";
+import { Sun, Moon, BarChart3, LogOut, User, MessageCircle, Calendar, Brain, Lock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,10 +11,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useStorage } from "@/contexts/StorageContext";
 
 export default function Header({ onOpenRecaps }) {
     const { theme, toggle } = useTheme();
     const { user, logout } = useAuth();
+    const { mode } = useStorage();
     const navigate = useNavigate();
 
     return (
@@ -29,8 +31,14 @@ export default function Header({ onOpenRecaps }) {
                     </div>
                     <div className="leading-tight">
                         <div className="font-display text-base font-medium">PericL</div>
-                        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                            voice journal
+                        <div className="text-[11px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                            <span>your inner voice</span>
+                            {mode !== "cloud" && (
+                                <span className="inline-flex items-center gap-1 text-primary" title="Stored on this device only">
+                                    <Lock className="w-2.5 h-2.5" />
+                                    on-device
+                                </span>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -42,7 +50,7 @@ export default function Header({ onOpenRecaps }) {
                         size="icon"
                         onClick={() => navigate("/chat")}
                         className="rounded-full h-9 w-9"
-                        aria-label="Talk to PericL"
+                        aria-label="Talk to yourself"
                     >
                         <MessageCircle className="w-4 h-4" />
                     </Button>
@@ -109,6 +117,13 @@ export default function Header({ onOpenRecaps }) {
                             >
                                 <Brain className="w-4 h-4 mr-2" />
                                 Personality test
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                data-testid="menu-privacy"
+                                onClick={() => navigate("/privacy")}
+                            >
+                                <Lock className="w-4 h-4 mr-2" />
+                                Privacy &amp; data
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem

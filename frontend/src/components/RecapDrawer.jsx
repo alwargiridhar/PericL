@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
+import { recap as recapStore } from "@/lib/storage";
 import { toast } from "sonner";
 
 export default function RecapDrawer({ open, onClose, recap, setRecap, busy, setBusy }) {
@@ -10,8 +10,8 @@ export default function RecapDrawer({ open, onClose, recap, setRecap, busy, setB
         // load latest
         (async () => {
             try {
-                const r = await api.get("/recap");
-                if (r.data?.length) setRecap(r.data[0]);
+                const list = await recapStore.list();
+                if (list?.length) setRecap(list[0]);
             } catch {}
         })();
     }, [open, recap, setRecap]);
@@ -21,11 +21,11 @@ export default function RecapDrawer({ open, onClose, recap, setRecap, busy, setB
     const generate = async () => {
         setBusy(true);
         try {
-            const r = await api.post("/recap/today");
-            setRecap(r.data);
-            toast.success("Today's recap is ready");
+            const r = await recapStore.today();
+            setRecap(r);
+            toast.success("Today's reflection is ready");
         } catch (e) {
-            toast.error(e?.response?.data?.detail || "Could not generate recap");
+            toast.error(e?.userMessage || e?.response?.data?.detail || "No entries today yet");
         } finally {
             setBusy(false);
         }
@@ -40,7 +40,7 @@ export default function RecapDrawer({ open, onClose, recap, setRecap, busy, setB
                 <div className="flex items-start justify-between gap-3 mb-4">
                     <div>
                         <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-                            Daily Recap
+                            Daily reflection
                         </div>
                         <h2 className="font-display text-2xl">
                             {recap?.recap_date

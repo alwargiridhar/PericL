@@ -50,18 +50,18 @@ export default function Login() {
                 <h1 className="font-display text-4xl sm:text-6xl tracking-tight font-medium leading-[1.05]">
                     Speak it.
                     <br />
-                    <span className="text-primary">We&rsquo;ll organize the rest.</span>
+                    <span className="text-primary">It&rsquo;s just you, written down.</span>
                 </h1>
                 <p className="mt-6 text-lg text-muted-foreground max-w-xl leading-relaxed">
-                    PericL is your private voice journal. Record a thought, dictate a reminder, or jot an idea —
-                    we sort it into <em>tasks</em>, <em>reminders</em>, and <em>ideas</em> automatically.
+                    PericL isn&rsquo;t an assistant. It&rsquo;s your inner voice — a calmer, slightly-ahead version of yourself
+                    you can talk to. Your thoughts stay on your device by default. You decide what travels.
                 </p>
 
                 <div className="mt-10 grid sm:grid-cols-3 gap-3">
                     {[
-                        { Icon: Mic, label: "Voice or text — your call" },
-                        { Icon: Sparkles, label: "AI sorts it for you" },
-                        { Icon: Bell, label: "Reminders come back" },
+                        { Icon: Mic, label: "Speak or type — your call" },
+                        { Icon: Sparkles, label: "Sorted into tasks, reminders, ideas" },
+                        { Icon: Bell, label: "Reminders find their way back" },
                     ].map(({ Icon, label }, i) => (
                         <div
                             key={label}
@@ -85,10 +85,19 @@ export default function Login() {
                         Continue with Google
                     </Button>
                     <p className="text-xs text-muted-foreground pl-2">
-                        We use Google sign-in to keep your journal yours, only.
+                        Sign in to begin. Your data stays on your device unless you choose otherwise.
                     </p>
                 </div>
             </div>
+            <FooterLogin />
+        </div>
+    );
+}
+
+function FooterLogin() {
+    return (
+        <div className="absolute bottom-3 inset-x-0 text-center text-[11px] text-muted-foreground z-10">
+            © {new Date().getFullYear()} Giridhar Alwar · PericL
         </div>
     );
 }

@@ -14,8 +14,9 @@ import {
     AlertDialogTitle,
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { api } from "@/lib/api";
+import { chat as chatStore, profile as profileStore, personality as personalityStore } from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
+import Footer from "@/components/Footer";
 
 function fmtTime(iso) {
     return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -35,13 +36,13 @@ export default function AiChat() {
         (async () => {
             try {
                 const [m, p, pa] = await Promise.all([
-                    api.get("/ai/messages"),
-                    api.get("/profile"),
-                    api.get("/personality/latest"),
+                    chatStore.list(),
+                    profileStore.get(),
+                    personalityStore.latest(),
                 ]);
-                setMessages(m.data || []);
-                setProfile(p.data || null);
-                setPersonality(pa.data || null);
+                setMessages(m || []);
+                setProfile(p || null);
+                setPersonality(pa || null);
             } catch {}
         })();
     }, []);
@@ -63,15 +64,15 @@ export default function AiChat() {
         };
         setMessages((prev) => [...prev, optimistic]);
         try {
-            const r = await api.post("/ai/chat", { message: t });
-            const { user_message, assistant_message } = r.data;
+            const data = await chatStore.send(t);
+            const { user_message, assistant_message } = data;
             setMessages((prev) => [
                 ...prev.filter((m) => m.id !== optimistic.id),
                 user_message,
                 assistant_message,
             ]);
         } catch {
-            toast.error("Couldn't reach PericL. Try again?");
+            toast.error("Couldn't reach you. Try again?");
             setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
         } finally {
             setLoading(false);
@@ -80,7 +81,7 @@ export default function AiChat() {
 
     const clearAll = async () => {
         try {
-            await api.delete("/ai/messages");
+            await chatStore.clearAll();
             setMessages([]);
             toast.success("Chat cleared");
         } catch {
@@ -107,9 +108,9 @@ export default function AiChat() {
                         <ArrowLeft className="w-5 h-5" />
                     </Button>
                     <div className="leading-tight">
-                        <div className="font-display text-base font-medium">Talk to PericL</div>
+                        <div className="font-display text-base font-medium">Talk to yourself</div>
                         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                            personal assistant · friend
+                            your inner voice · written down
                         </div>
                     </div>
                     <div className="ml-auto">
@@ -127,9 +128,9 @@ export default function AiChat() {
                                 </AlertDialogTrigger>
                                 <AlertDialogContent>
                                     <AlertDialogHeader>
-                                        <AlertDialogTitle>Clear chat history?</AlertDialogTitle>
+                                        <AlertDialogTitle>Clear this conversation?</AlertDialogTitle>
                                         <AlertDialogDescription>
-                                            This will permanently delete all messages with PericL. This can&apos;t be undone.
+                                            This will permanently delete every message you&apos;ve had with yourself here. This can&apos;t be undone.
                                         </AlertDialogDescription>
                                     </AlertDialogHeader>
                                     <AlertDialogFooter>
@@ -160,8 +161,8 @@ export default function AiChat() {
                         </div>
                         <h2 className="font-display text-3xl">Hey {user?.name?.split(" ")[0] || "there"}.</h2>
                         <p className="text-muted-foreground mt-3 max-w-md mx-auto leading-relaxed">
-                            I&apos;m your assistant and a quiet friend. Tell me what&apos;s on your mind, ask me to help plan,
-                            vent, or just think out loud.
+                            This is just you, written down. Tell yourself what&apos;s on your mind, push back at yourself,
+                            plan, vent, or think out loud.
                         </p>
                         {needsAssessment && (
                             <button
@@ -170,7 +171,7 @@ export default function AiChat() {
                                 className="mt-6 inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-accent text-accent-foreground text-sm font-medium"
                             >
                                 <Brain className="w-4 h-4" />
-                                Take the 5-min personality test for richer chats
+                                Take the 5-min personality test for a sharper mirror
                             </button>
                         )}
                     </div>
@@ -224,7 +225,7 @@ export default function AiChat() {
                                     send();
                                 }
                             }}
-                            placeholder={profile?.onboarding_completed ? "What's on your mind?" : "Tell me about yourself…"}
+                            placeholder={profile?.onboarding_completed ? "What's on your mind?" : "Tell yourself who you are…"}
                             rows={1}
                             className="flex-1 resize-none bg-transparent border-0 focus:outline-none px-3 py-3 text-base placeholder:text-muted-foreground max-h-32"
                         />
@@ -240,6 +241,7 @@ export default function AiChat() {
                     </div>
                 </div>
             </div>
+            <Footer />
         </div>
     );
 }

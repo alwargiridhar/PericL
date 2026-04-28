@@ -5,7 +5,9 @@ import Header from "@/components/Header";
 import VoiceDock from "@/components/VoiceDock";
 import TimelineItem from "@/components/TimelineItem";
 import RecapDrawer from "@/components/RecapDrawer";
-import { api } from "@/lib/api";
+import Footer from "@/components/Footer";
+import CloudSyncPrompt from "@/components/CloudSyncPrompt";
+import { journal } from "@/lib/storage";
 
 export default function Journal() {
     const [items, setItems] = useState([]);
@@ -20,8 +22,8 @@ export default function Journal() {
 
     const load = useCallback(async () => {
         try {
-            const r = await api.get("/timeline");
-            setItems(r.data || []);
+            const items = await journal.list();
+            setItems(items || []);
         } catch {
             // 401 handled by interceptor / route
         } finally {
@@ -52,7 +54,7 @@ export default function Journal() {
                             action: {
                                 label: "Done",
                                 onClick: async () => {
-                                    await api.patch(`/items/${it.id}`, { completed: true });
+                                    await journal.update(it.id, { completed: true });
                                     load();
                                 },
                             },
@@ -67,19 +69,13 @@ export default function Journal() {
 
     const sendVoice = async ({ blob, duration, transcript }) => {
         setBusy(true);
-        const fd = new FormData();
-        fd.append("audio", blob, "recording.webm");
-        fd.append("duration", String(duration));
-        fd.append("transcription", transcript || "");
         try {
-            const r = await api.post("/notes/voice", fd, {
-                headers: { "Content-Type": "multipart/form-data" },
-            });
-            const note = r.data?.note;
-            const extracted = r.data?.extracted || [];
+            const data = await journal.createVoice({ blob, duration, transcript });
+            const note = data?.note;
+            const extracted = data?.extracted || [];
             setItems((prev) => [...[...extracted].reverse(), note, ...prev]);
             toast.success(extracted.length ? `Saved + ${extracted.length} item${extracted.length > 1 ? "s" : ""}` : "Saved");
-        } catch (e) {
+        } catch {
             toast.error("Could not save voice note");
         } finally {
             setBusy(false);
@@ -89,9 +85,9 @@ export default function Journal() {
     const sendText = async (text) => {
         setBusy(true);
         try {
-            const r = await api.post("/notes/text", { text });
-            const note = r.data?.note;
-            const extracted = r.data?.extracted || [];
+            const data = await journal.createText(text);
+            const note = data?.note;
+            const extracted = data?.extracted || [];
             setItems((prev) => [...[...extracted].reverse(), note, ...prev]);
             if (extracted.length) toast.success(`Sorted into ${extracted.length} item${extracted.length > 1 ? "s" : ""}`);
         } catch {
@@ -103,8 +99,8 @@ export default function Journal() {
 
     const toggleItem = async (item) => {
         try {
-            const r = await api.patch(`/items/${item.id}`, { completed: !item.completed });
-            setItems((prev) => prev.map((i) => (i.id === item.id ? r.data : i)));
+            const updated = await journal.update(item.id, { completed: !item.completed });
+            setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)));
         } catch {
             toast.error("Could not update");
         }
@@ -112,7 +108,7 @@ export default function Journal() {
 
     const deleteItem = async (item) => {
         try {
-            await api.delete(`/items/${item.id}`);
+            await journal.delete(item.id);
             setItems((prev) => prev.filter((i) => i.id !== item.id));
             toast.success("Removed");
         } catch {
@@ -169,6 +165,9 @@ export default function Journal() {
                 busy={recapBusy}
                 setBusy={setRecapBusy}
             />
+
+            <CloudSyncPrompt />
+            <Footer />
         </div>
     );
 }
@@ -186,7 +185,7 @@ function EmptyState() {
             <h2 className="font-display text-3xl tracking-tight">Your inner voice, captured.</h2>
             <p className="text-muted-foreground mt-3 max-w-sm mx-auto leading-relaxed">
                 Tap <span className="font-medium text-foreground">record</span> below to capture a thought.
-                PericL will sort it into <em>tasks</em>, <em>reminders</em>, and <em>ideas</em>.
+                It&apos;ll be sorted into <em>tasks</em>, <em>reminders</em>, and <em>ideas</em> automatically.
             </p>
             <div className="mt-8 flex flex-col gap-2 max-w-md mx-auto text-left">
                 {[

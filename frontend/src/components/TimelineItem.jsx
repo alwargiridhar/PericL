@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Bell, Lightbulb, Mic, Trash2, ListTodo, FileText } from "lucide-react";
-import { audioUrl } from "@/lib/api";
+import { journal } from "@/lib/storage";
 
 const TYPE_META = {
     voice: { Icon: Mic, label: "Voice", tone: "primary" },
@@ -36,17 +36,34 @@ export default function TimelineItem({ item, onToggle, onDelete }) {
     const isMine = item.type === "voice" || item.type === "text";
     const isExtracted = item.type === "task" || item.type === "reminder" || item.type === "idea";
     const due = useMemo(() => fmtDue(item.due_at), [item.due_at]);
+    const [audioSrc, setAudioSrc] = useState(null);
+
+    useEffect(() => {
+        let revokeUrl = null;
+        if (item.type === "voice" && item.audio_id) {
+            (async () => {
+                const url = await journal.audioObjectURL(item.audio_id);
+                if (url) {
+                    setAudioSrc(url);
+                    if (url.startsWith("blob:")) revokeUrl = url;
+                }
+            })();
+        }
+        return () => {
+            if (revokeUrl) URL.revokeObjectURL(revokeUrl);
+        };
+    }, [item.type, item.audio_id]);
 
     if (isMine) {
         return (
             <div className="flex justify-end animate-float-in" data-testid={`timeline-item-${item.type}`}>
                 <div className="max-w-[85%]">
                     <div className="bubble-mine px-4 py-3 shadow-md shadow-primary/15">
-                        {item.type === "voice" && item.audio_id && (
+                        {item.type === "voice" && audioSrc && (
                             <audio
                                 data-testid={`audio-${item.id}`}
                                 controls
-                                src={audioUrl(item.audio_id)}
+                                src={audioSrc}
                                 className="w-full mb-2 max-w-xs"
                                 style={{ filter: "invert(0)" }}
                             />

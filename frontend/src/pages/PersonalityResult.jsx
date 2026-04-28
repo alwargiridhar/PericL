@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Sparkles, Target, TrendingUp, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
+import { personality as personalityStore } from "@/lib/storage";
 import { personalityTypes } from "@/data/mbti-questions";
+import Footer from "@/components/Footer";
 
 export default function PersonalityResult() {
     const navigate = useNavigate();
@@ -14,8 +15,9 @@ export default function PersonalityResult() {
     useEffect(() => {
         (async () => {
             try {
-                const r = await api.get(`/personality/result/${id}`);
-                setData(r.data);
+                const data = await personalityStore.result(id);
+                if (!data) throw new Error("Not found");
+                setData(data);
             } catch {
                 navigate("/personality/assessment", { replace: true });
             } finally {
@@ -128,7 +130,7 @@ export default function PersonalityResult() {
                         className="w-full h-12 rounded-full"
                     >
                         <MessageCircle className="w-4 h-4 mr-2" />
-                        Chat with PericL — now it knows you
+                        Talk to yourself — now your mirror knows you
                     </Button>
                     <Button
                         data-testid="result-retake"
@@ -140,6 +142,7 @@ export default function PersonalityResult() {
                     </Button>
                 </div>
             </main>
+            <Footer />
         </div>
     );
 }

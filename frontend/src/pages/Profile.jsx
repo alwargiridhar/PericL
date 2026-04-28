@@ -5,8 +5,9 @@ import { Toaster, toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
+import { profile as profileStore, personality as personalityStore } from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
+import Footer from "@/components/Footer";
 
 const FIELDS = [
     "name", "age", "occupation", "goals", "challenges",
@@ -28,17 +29,17 @@ export default function Profile() {
         (async () => {
             try {
                 const [p, pa] = await Promise.all([
-                    api.get("/profile"),
-                    api.get("/personality/latest"),
+                    profileStore.get(),
+                    personalityStore.latest(),
                 ]);
                 const merged = { ...empty() };
                 FIELDS.forEach((f) => {
-                    const v = p.data?.[f];
+                    const v = p?.[f];
                     if (v !== null && v !== undefined) merged[f] = String(v);
                 });
                 if (!merged.name && user?.name) merged.name = user.name;
                 setProfile(merged);
-                setPersonality(pa.data?.assessment || null);
+                setPersonality(pa?.assessment || null);
             } finally {
                 setLoading(false);
             }
@@ -59,7 +60,7 @@ export default function Profile() {
                     payload[f] = profile[f] || null;
                 }
             });
-            await api.put("/profile", payload);
+            await profileStore.put(payload);
             toast.success("Profile saved");
         } catch {
             toast.error("Could not save profile");
@@ -96,9 +97,9 @@ export default function Profile() {
 
             <main className="max-w-2xl mx-auto px-4 py-8 space-y-8">
                 <div>
-                    <h1 className="font-display text-3xl tracking-tight">Personality builder</h1>
+                    <h1 className="font-display text-3xl tracking-tight">A clearer picture of you</h1>
                     <p className="text-muted-foreground mt-1.5 leading-relaxed">
-                        Help PericL understand you better. The more it knows, the more grounded its replies become.
+                        The more you write down about yourself, the sharper your inner voice becomes when you talk to it.
                     </p>
                 </div>
 
@@ -230,7 +231,7 @@ export default function Profile() {
                     ) : (
                         <div className="rounded-2xl border-2 border-dashed border-border p-6 text-center">
                             <p className="text-sm text-muted-foreground mb-4">
-                                Take a quick 5-minute MBTI assessment so PericL can mirror you better.
+                                Take a quick 5-minute MBTI assessment so your inner voice can mirror you better.
                             </p>
                             <Button
                                 data-testid="profile-take-assessment"
@@ -263,6 +264,7 @@ export default function Profile() {
                     </Button>
                 </div>
             </main>
+            <Footer />
         </div>
     );
 }

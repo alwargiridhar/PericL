@@ -953,6 +953,11 @@ async def stateless_chat(payload: dict, user: User = Depends(get_current_user)):
 @api.post("/ai/recap-stateless")
 async def stateless_recap(payload: dict, user: User = Depends(get_current_user)):
     items = payload.get("items") or []
+    # Sort newest-first then take 30 most recent so long days don't lose recency
+    try:
+        items = sorted(items, key=lambda i: i.get("created_at") or "", reverse=True)
+    except Exception:
+        pass
     bullet_lines = []
     for v in items[:30]:
         line = v.get("transcription") or v.get("detail") or v.get("title") or ""

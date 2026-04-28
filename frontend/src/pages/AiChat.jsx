@@ -17,8 +17,23 @@ import {
 import { chat as chatStore, profile as profileStore, personality as personalityStore } from "@/lib/storage";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { useStorage } from "@/contexts/StorageContext";
 import Footer from "@/components/Footer";
 import MoodEmojiBurst from "@/components/MoodEmojiBurst";
+
+// Lightweight client-side mood heuristic — used in local mode to avoid an extra
+// LLM round-trip when the user has chosen privacy. Falls back to "happy" so
+// every send still triggers a positive emoji burst.
+function inferMoodLocal(text) {
+    const t = (text || "").toLowerCase();
+    if (/[!]{2,}|🎉|amazing|incredible|stoked|let'?s go|finally|shipped|launch/i.test(t)) return "excited";
+    if (/happy|grateful|joy|love|blessed|smile|good day|win|proud/i.test(t)) return "happy";
+    if (/stress|overwhelm|anxious|panic|deadline|too much|burn(ed|t)? out/i.test(t)) return "stressed";
+    if (/sad|down|cry|lonely|miss|hurt|alone|tired/i.test(t)) return "sad";
+    if (/calm|peaceful|breathe|quiet|still|relax/i.test(t)) return "calm";
+    if (/focus|plan|ship|build|goal|priorit|launch|strateg/i.test(t)) return "focused";
+    return "happy";
+}
 
 function fmtTime(iso) {
     return new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
@@ -27,6 +42,7 @@ function fmtTime(iso) {
 export default function AiChat() {
     const navigate = useNavigate();
     const { user } = useAuth();
+    const { mode } = useStorage();
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
@@ -68,17 +84,25 @@ export default function AiChat() {
         };
         setMessages((prev) => [...prev, optimistic]);
 
-        // Detect mood from user's message in parallel — for the floating emoji burst.
-        api
-            .post("/ai/categorize", { text: t })
-            .then((r) => {
-                const m = r.data?.mood || null;
-                if (m) {
-                    setMood(m);
-                    setMoodTrigger((n) => n + 1);
-                }
-            })
-            .catch(() => {});
+        // Detect mood from user's message — for the floating emoji burst.
+        // In privacy modes (local/never), use a client-side heuristic so the
+        // user's words never leave the device just for the emoji burst.
+        if (mode === "cloud") {
+            api
+                .post("/ai/categorize", { text: t })
+                .then((r) => {
+                    const m = r.data?.mood || null;
+                    if (m) {
+                        setMood(m);
+                        setMoodTrigger((n) => n + 1);
+                    }
+                })
+                .catch(() => {});
+        } else {
+            const m = inferMoodLocal(t);
+            setMood(m);
+            setMoodTrigger((n) => n + 1);
+        }
 
         try {
             const data = await chatStore.send(t);

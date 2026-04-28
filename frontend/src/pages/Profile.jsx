@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { profile as profileStore, personality as personalityStore } from "@/lib/storage";
 import { useAuth } from "@/contexts/AuthContext";
 import Footer from "@/components/Footer";
+import MoodChart from "@/components/MoodChart";
 
 const FIELDS = [
     "name", "age", "occupation", "goals", "challenges",
@@ -102,6 +103,8 @@ export default function Profile() {
                         The more you write down about yourself, the sharper your inner voice becomes when you talk to it.
                     </p>
                 </div>
+
+                <MoodChart days={30} />
 
                 <Section icon={User} title="Basic information" subtitle="Tell us about yourself">
                     <div className="grid sm:grid-cols-2 gap-3">

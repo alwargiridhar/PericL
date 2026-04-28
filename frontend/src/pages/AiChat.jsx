@@ -82,7 +82,15 @@ export default function AiChat() {
             content: t,
             created_at: new Date().toISOString(),
         };
-        setMessages((prev) => [...prev, optimistic]);
+        const streamId = `streaming-${Date.now()}`;
+        const streamingMsg = {
+            id: streamId,
+            role: "assistant",
+            content: "",
+            created_at: new Date().toISOString(),
+            streaming: true,
+        };
+        setMessages((prev) => [...prev, optimistic, streamingMsg]);
 
         // Detect mood from user's message — for the floating emoji burst.
         // In privacy modes (local/never), use a client-side heuristic so the
@@ -105,16 +113,20 @@ export default function AiChat() {
         }
 
         try {
-            const data = await chatStore.send(t);
+            const data = await chatStore.sendStream(t, (_delta, full) => {
+                setMessages((prev) =>
+                    prev.map((m) => (m.id === streamId ? { ...m, content: full } : m))
+                );
+            });
             const { user_message, assistant_message } = data;
             setMessages((prev) => [
-                ...prev.filter((m) => m.id !== optimistic.id),
+                ...prev.filter((m) => m.id !== optimistic.id && m.id !== streamId),
                 user_message,
                 assistant_message,
             ]);
         } catch {
             toast.error("Couldn't reach you. Try again?");
-            setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+            setMessages((prev) => prev.filter((m) => m.id !== optimistic.id && m.id !== streamId));
         } finally {
             setLoading(false);
         }
@@ -231,24 +243,30 @@ export default function AiChat() {
                                     m.role === "user" ? "bubble-mine" : "bubble-them"
                                 }`}
                             >
-                                <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{m.content}</p>
-                                <p className={`text-[11px] mt-1 ${m.role === "user" ? "opacity-70" : "text-muted-foreground"}`}>
-                                    {fmtTime(m.created_at)}
-                                </p>
+                                {m.streaming && !m.content ? (
+                                    <div className="flex gap-1 py-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce" />
+                                        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "120ms" }} />
+                                        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "240ms" }} />
+                                    </div>
+                                ) : (
+                                    <>
+                                        <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
+                                            {m.content}
+                                            {m.streaming && (
+                                                <span className="inline-block w-1.5 h-3.5 ml-0.5 align-middle bg-current opacity-60 animate-pulse" />
+                                            )}
+                                        </p>
+                                        {!m.streaming && (
+                                            <p className={`text-[11px] mt-1 ${m.role === "user" ? "opacity-70" : "text-muted-foreground"}`}>
+                                                {fmtTime(m.created_at)}
+                                            </p>
+                                        )}
+                                    </>
+                                )}
                             </div>
                         </div>
                     ))}
-                    {loading && (
-                        <div className="flex justify-start animate-float-in">
-                            <div className="bubble-them px-4 py-3">
-                                <div className="flex gap-1">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce" />
-                                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "120ms" }} />
-                                    <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-bounce" style={{ animationDelay: "240ms" }} />
-                                </div>
-                            </div>
-                        </div>
-                    )}
                     <div ref={endRef} />
                 </div>
             </main>

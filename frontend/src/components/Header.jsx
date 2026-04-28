@@ -1,4 +1,4 @@
-import { Sun, Moon, BarChart3, LogOut, User, MessageCircle, Calendar, Brain, Lock, Shield, KeyRound } from "lucide-react";
+import { Sun, Moon, BarChart3, LogOut, User, MessageCircle, Calendar, Brain, Lock, Shield, KeyRound, Target, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +44,26 @@ export default function Header({ onOpenRecaps }) {
                 </div>
 
                 <div className="ml-auto flex items-center gap-1">
+                    <Button
+                        data-testid="header-search-btn"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate("/search")}
+                        className="rounded-full h-9 w-9"
+                        aria-label="Search"
+                    >
+                        <Search className="w-4 h-4" />
+                    </Button>
+                    <Button
+                        data-testid="header-missions-btn"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate("/missions")}
+                        className="rounded-full h-9 w-9"
+                        aria-label="Missions"
+                    >
+                        <Target className="w-4 h-4" />
+                    </Button>
                     <Button
                         data-testid="header-chat-btn"
                         variant="ghost"

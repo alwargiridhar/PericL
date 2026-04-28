@@ -10,10 +10,15 @@ import Journal from "@/pages/Journal";
 import AiChat from "@/pages/AiChat";
 import Profile from "@/pages/Profile";
 import PersonalityAssessment from "@/pages/PersonalityAssessment";
+import MbtiAssessment from "@/pages/MbtiAssessment";
+import BigFiveAssessment from "@/pages/BigFiveAssessment";
+import BigFiveResult from "@/pages/BigFiveResult";
 import PersonalityResult from "@/pages/PersonalityResult";
 import DailyPrompt from "@/pages/DailyPrompt";
 import Privacy from "@/pages/Privacy";
 import Admin from "@/pages/Admin";
+import MissionsPage from "@/pages/Missions";
+import SearchPage from "@/pages/Search";
 
 function AppRouter() {
     const location = useLocation();
@@ -26,11 +31,16 @@ function AppRouter() {
             <Route path="/" element={<ProtectedRoute><Journal /></ProtectedRoute>} />
             <Route path="/chat" element={<ProtectedRoute><AiChat /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+            <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
             <Route path="/personality/assessment" element={<ProtectedRoute><PersonalityAssessment /></ProtectedRoute>} />
+            <Route path="/personality/mbti" element={<ProtectedRoute><MbtiAssessment /></ProtectedRoute>} />
+            <Route path="/personality/big-five" element={<ProtectedRoute><BigFiveAssessment /></ProtectedRoute>} />
+            <Route path="/personality/big-five/result/:id" element={<ProtectedRoute><BigFiveResult /></ProtectedRoute>} />
             <Route path="/personality/result/:id" element={<ProtectedRoute><PersonalityResult /></ProtectedRoute>} />
             <Route path="/daily-prompt" element={<ProtectedRoute><DailyPrompt /></ProtectedRoute>} />
             <Route path="/privacy" element={<ProtectedRoute><Privacy /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute><Admin /></ProtectedRoute>} />
+            <Route path="/missions" element={<ProtectedRoute><MissionsPage /></ProtectedRoute>} />
             <Route path="*" element={<Login />} />
         </Routes>
     );

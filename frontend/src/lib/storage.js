@@ -20,6 +20,8 @@ const LS = {
     PROMPT_TODAY_PREFIX: "pericl.daily_prompt.", // + YYYY-MM-DD
     PROMPT_HISTORY: "pericl.daily_prompts_history",
     RECAPS: "pericl.daily_recaps",
+    MISSIONS: "pericl.missions",
+    MISSION_PROGRESS: "pericl.mission_progress",
 };
 
 // ---------- IndexedDB for audio (avoids 5MB localStorage cap) ----------
@@ -139,6 +141,24 @@ export const personality = {
         const r = await api.post("/ai/personality-analyze", { scores, profile: prof });
         const rec = {
             id: uid("pa"),
+            framework: "mbti",
+            ...r.data,
+            created_at: nowIso(),
+        };
+        const list = lsGet(LS.PERSONALITY, []);
+        list.unshift(rec);
+        lsSet(LS.PERSONALITY, list.slice(0, 30));
+        return rec;
+    },
+    async assessBigFive(answers) {
+        if (isCloud()) {
+            const r = await api.post("/personality/big-five-assess", { answers });
+            return r.data;
+        }
+        const prof = lsGet(LS.PROFILE, null);
+        const r = await api.post("/ai/big-five-analyze", { answers, profile: prof });
+        const rec = {
+            id: uid("pa"),
             ...r.data,
             created_at: nowIso(),
         };
@@ -207,7 +227,9 @@ export const journal = {
             }));
         const list = lsGet(LS.JOURNAL, []);
         lsSet(LS.JOURNAL, [...extracted.slice().reverse(), note, ...list]);
-        return { note, extracted };
+        // Best-effort mission progress auto-detection (local mode)
+        const mp = await missions.detectAndLog(text, noteId);
+        return { note, extracted, mission_progress: mp };
     },
     async createVoice({ blob, duration, transcript }) {
         if (isCloud()) {
@@ -268,7 +290,8 @@ export const journal = {
             }));
         const list = lsGet(LS.JOURNAL, []);
         lsSet(LS.JOURNAL, [...extracted.slice().reverse(), note, ...list]);
-        return { note, extracted };
+        const mp = text ? await missions.detectAndLog(text, noteId) : null;
+        return { note, extracted, mission_progress: mp };
     },
     async update(id, patch) {
         if (isCloud()) {
@@ -301,6 +324,233 @@ export const journal = {
             if (blob) return URL.createObjectURL(blob);
         } catch {}
         return null;
+    },
+};
+
+// ---------- Missions (cloud + local) ----------
+const MAX_ACTIVE_MISSIONS_FE = 3;
+
+function _computeStatsLocal(mission, entries) {
+    const now = Date.now();
+    const start = new Date(mission.start_at || mission.created_at || now).getTime();
+    const target = mission.target_date ? new Date(mission.target_date).getTime() : null;
+    const totalDays = target ? Math.max(1, Math.round((target - start) / 86400000)) : null;
+    const elapsedDays = Math.max(0, Math.round((now - start) / 86400000));
+    const daysRemaining = target ? Math.max(0, Math.round((target - now) / 86400000)) : null;
+
+    const tracks = (mission.tracks || []).map((t) => {
+        const trEntries = entries.filter((e) => e.track_id === t.id);
+        const logged = trEntries.reduce((s, e) => s + Number(e.units || 0), 0);
+        const targetUnits = Number(t.target_units || 0);
+        return {
+            id: t.id,
+            title: t.title,
+            unit_label: t.unit_label || "units",
+            target_units: targetUnits,
+            logged_units: logged,
+            percent: targetUnits ? Math.min(100, (logged / targetUnits) * 100) : 0,
+            entries_count: trEntries.length,
+            last_logged_at: trEntries[0]?.created_at || null,
+        };
+    });
+    const grandLogged = tracks.reduce((s, t) => s + t.logged_units, 0);
+    const grandTarget = tracks.reduce((s, t) => s + t.target_units, 0);
+
+    let pace = "unknown";
+    let expected = 0;
+    if (grandTarget && totalDays) {
+        expected = grandTarget * (elapsedDays / totalDays);
+        if (grandLogged >= expected * 1.05) pace = "ahead";
+        else if (grandLogged >= expected * 0.85) pace = "on_track";
+        else pace = "behind";
+    }
+
+    const dayKeys = new Set(entries.map((e) => (e.created_at || "").slice(0, 10)).filter(Boolean));
+    const consistencyPct = elapsedDays ? (dayKeys.size / elapsedDays) * 100 : 0;
+    const effortCounts = { low: 0, medium: 0, deep: 0 };
+    entries.forEach((e) => { if (effortCounts[e.effort] !== undefined) effortCounts[e.effort] += 1; });
+    const lastLogged = entries.length ? entries[0].created_at : null;
+    const daysSinceLast = lastLogged
+        ? Math.round((now - new Date(lastLogged).getTime()) / 86400000)
+        : null;
+    return {
+        tracks,
+        logged_units: grandLogged,
+        target_units: grandTarget,
+        expected_units_today: Math.round(expected * 10) / 10,
+        percent_complete: grandTarget ? Math.min(100, (grandLogged / grandTarget) * 100) : 0,
+        elapsed_days: elapsedDays,
+        days_remaining: daysRemaining,
+        total_days: totalDays,
+        pace,
+        consistency_pct: Math.round(consistencyPct * 10) / 10,
+        effort_counts: effortCounts,
+        days_since_last_progress: daysSinceLast,
+        entries_count: entries.length,
+    };
+}
+
+function _serializeMissionLocal(mission) {
+    const allProgress = lsGet(LS.MISSION_PROGRESS, []);
+    const entries = allProgress
+        .filter((p) => p.mission_id === mission.id)
+        .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+    return { ...mission, stats: _computeStatsLocal(mission, entries) };
+}
+
+export const missions = {
+    async list() {
+        if (isCloud()) {
+            const r = await api.get("/missions");
+            return r.data;
+        }
+        const list = lsGet(LS.MISSIONS, []);
+        return list.map(_serializeMissionLocal);
+    },
+    async create(payload) {
+        if (isCloud()) {
+            const r = await api.post("/missions", payload);
+            return r.data;
+        }
+        const list = lsGet(LS.MISSIONS, []);
+        const activeCount = list.filter((m) => m.is_active !== false).length;
+        if (activeCount >= MAX_ACTIVE_MISSIONS_FE) {
+            const e = new Error(`Max ${MAX_ACTIVE_MISSIONS_FE} active missions; archive one first`);
+            e.userMessage = e.message;
+            throw e;
+        }
+        const tracks = (payload.tracks || []).slice(0, 6).map((t) => ({
+            id: uid("trk"),
+            title: String(t.title || "").trim().slice(0, 120),
+            target_units: Number(t.target_units || 0),
+            unit_label: String(t.unit_label || "units").trim().slice(0, 24),
+            is_active: true,
+        })).filter((t) => t.title);
+        const m = {
+            id: uid("msn"),
+            title: String(payload.title || "").trim().slice(0, 160),
+            outcome: String(payload.outcome || "").slice(0, 400),
+            target_date: payload.target_date || null,
+            start_at: nowIso(),
+            is_active: true,
+            tracks,
+            created_at: nowIso(),
+        };
+        if (!m.title) {
+            const e = new Error("Mission title required");
+            e.userMessage = e.message;
+            throw e;
+        }
+        list.unshift(m);
+        lsSet(LS.MISSIONS, list);
+        return _serializeMissionLocal(m);
+    },
+    async update(id, payload) {
+        if (isCloud()) {
+            const r = await api.patch(`/missions/${id}`, payload);
+            return r.data;
+        }
+        const list = lsGet(LS.MISSIONS, []);
+        const i = list.findIndex((m) => m.id === id);
+        if (i === -1) throw new Error("Not found");
+        const cur = list[i];
+        const next = { ...cur };
+        ["title", "outcome", "target_date"].forEach((k) => {
+            if (k in payload) next[k] = payload[k];
+        });
+        if ("is_active" in payload) next.is_active = !!payload.is_active;
+        if ("tracks" in payload) {
+            next.tracks = (payload.tracks || []).slice(0, 6).map((t) => ({
+                id: t.id || uid("trk"),
+                title: String(t.title || "").trim().slice(0, 120),
+                target_units: Number(t.target_units || 0),
+                unit_label: String(t.unit_label || "units").trim().slice(0, 24),
+                is_active: t.is_active !== false,
+            })).filter((t) => t.title);
+        }
+        list[i] = next;
+        lsSet(LS.MISSIONS, list);
+        return _serializeMissionLocal(next);
+    },
+    async delete(id) {
+        if (isCloud()) {
+            await api.delete(`/missions/${id}`);
+            return;
+        }
+        lsSet(LS.MISSIONS, lsGet(LS.MISSIONS, []).filter((m) => m.id !== id));
+        lsSet(LS.MISSION_PROGRESS, lsGet(LS.MISSION_PROGRESS, []).filter((p) => p.mission_id !== id));
+    },
+    async logProgress(missionId, payload) {
+        if (isCloud()) {
+            const r = await api.post(`/missions/${missionId}/progress`, payload);
+            return r.data;
+        }
+        const list = lsGet(LS.MISSIONS, []);
+        const m = list.find((x) => x.id === missionId);
+        if (!m) throw new Error("Mission not found");
+        if (payload.track_id && !(m.tracks || []).find((t) => t.id === payload.track_id)) {
+            throw new Error("Track not found");
+        }
+        const entry = {
+            id: uid("prg"),
+            mission_id: missionId,
+            track_id: payload.track_id || null,
+            units: Number(payload.units || 0),
+            effort: ["low", "medium", "deep"].includes(payload.effort) ? payload.effort : "medium",
+            note: String(payload.note || "").slice(0, 400),
+            journal_item_id: payload.journal_item_id || null,
+            detected: !!payload.detected,
+            confidence: payload.confidence,
+            created_at: nowIso(),
+        };
+        if (entry.units <= 0) throw new Error("units must be > 0");
+        const all = lsGet(LS.MISSION_PROGRESS, []);
+        all.unshift(entry);
+        lsSet(LS.MISSION_PROGRESS, all);
+        return entry;
+    },
+    async progressList(missionId) {
+        if (isCloud()) {
+            const r = await api.get(`/missions/${missionId}/progress`);
+            return r.data;
+        }
+        return lsGet(LS.MISSION_PROGRESS, []).filter((p) => p.mission_id === missionId);
+    },
+    async deleteProgress(entryId) {
+        if (isCloud()) {
+            await api.delete(`/missions/progress/${entryId}`);
+            return;
+        }
+        lsSet(LS.MISSION_PROGRESS, lsGet(LS.MISSION_PROGRESS, []).filter((p) => p.id !== entryId));
+    },
+    // Auto-detect progress from a journal text (used by journal.createText/Voice in local mode)
+    async detectAndLog(text, journalItemId) {
+        if (!text || isCloud()) return null; // cloud server already runs detection
+        const all = lsGet(LS.MISSIONS, []).filter((m) => m.is_active !== false);
+        if (!all.length) return null;
+        try {
+            const r = await api.post("/ai/detect-progress", { text, missions: all });
+            const d = r.data;
+            if (!d || !d.mission_id || (d.confidence || 0) < 0.55 || !(d.units > 0)) return null;
+            const entry = {
+                id: uid("prg"),
+                mission_id: d.mission_id,
+                track_id: d.track_id || null,
+                units: Number(d.units),
+                effort: d.effort || "medium",
+                note: d.note || "",
+                journal_item_id: journalItemId,
+                detected: true,
+                confidence: d.confidence,
+                created_at: nowIso(),
+            };
+            const list = lsGet(LS.MISSION_PROGRESS, []);
+            list.unshift(entry);
+            lsSet(LS.MISSION_PROGRESS, list);
+            return entry;
+        } catch {
+            return null;
+        }
     },
 };
 
@@ -397,6 +647,10 @@ export const chat = {
             recent_moods,
             behavior: _computeBehaviorSignalsLocal(),
             current_mood: _inferMoodLocal(message),
+            missions: lsGet(LS.MISSIONS, [])
+                .filter((m) => m.is_active !== false)
+                .slice(0, 3)
+                .map(_serializeMissionLocal),
         });
         const asstMsg = {
             id: uid("m"),
@@ -421,6 +675,101 @@ export const chat = {
         }
         const list = lsGet(LS.CHAT, []);
         lsSet(LS.CHAT, list.filter((m) => m.id !== id));
+    },
+    /**
+     * Streaming send. onDelta(token) is called for each chunk.
+     * Returns { user_message, assistant_message } at the end.
+     */
+    async sendStream(message, onDelta) {
+        const headers = { "Content-Type": "application/json" };
+        const url = isCloud()
+            ? `${api.defaults.baseURL}/ai/chat/stream`
+            : `${api.defaults.baseURL}/ai/chat-stateless/stream`;
+        let body;
+        if (isCloud()) {
+            body = JSON.stringify({ message });
+        } else {
+            const history = lsGet(LS.CHAT, []);
+            const prof = lsGet(LS.PROFILE, null);
+            const palist = lsGet(LS.PERSONALITY, []);
+            const personalityDoc = palist[0] || null;
+            const journalList = lsGet(LS.JOURNAL, []);
+            const recent_moods = journalList
+                .filter((i) => i.type === "voice" || i.type === "text")
+                .map((i) => i.mood)
+                .filter(Boolean)
+                .slice(0, 8);
+            body = JSON.stringify({
+                message,
+                history,
+                profile: prof,
+                personality: personalityDoc,
+                recent_moods,
+                behavior: _computeBehaviorSignalsLocal(),
+                current_mood: _inferMoodLocal(message),
+                missions: lsGet(LS.MISSIONS, [])
+                    .filter((m) => m.is_active !== false)
+                    .slice(0, 3)
+                    .map(_serializeMissionLocal),
+            });
+        }
+        const resp = await fetch(url, {
+            method: "POST",
+            headers,
+            credentials: "include",
+            body,
+        });
+        if (!resp.ok || !resp.body) {
+            throw new Error(`Stream failed: ${resp.status}`);
+        }
+        const reader = resp.body.getReader();
+        const dec = new TextDecoder();
+        let buf = "";
+        let full = "";
+        let userMsgId = null;
+        let asstMsgId = null;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            const frames = buf.split("\n\n");
+            buf = frames.pop() || "";
+            for (const f of frames) {
+                const line = f.split("\n").find((l) => l.startsWith("data: "));
+                if (!line) continue;
+                const payload = line.slice(6).trim();
+                if (payload === "[DONE]") continue;
+                try {
+                    const obj = JSON.parse(payload);
+                    if (obj.meta) {
+                        userMsgId = obj.meta.user_message_id || userMsgId;
+                        asstMsgId = obj.meta.assistant_message_id || asstMsgId;
+                    } else if (typeof obj.delta === "string") {
+                        full += obj.delta;
+                        onDelta && onDelta(obj.delta, full);
+                    }
+                } catch {}
+            }
+        }
+        const created_at = nowIso();
+        const user_message = {
+            id: userMsgId || uid("m"),
+            role: "user",
+            content: message,
+            created_at,
+        };
+        const assistant_message = {
+            id: asstMsgId || uid("m"),
+            role: "assistant",
+            content: full.trim(),
+            created_at,
+        };
+        if (!isCloud()) {
+            const history = lsGet(LS.CHAT, []);
+            lsSet(LS.CHAT, [...history, user_message, assistant_message]);
+        }
+        return { user_message, assistant_message };
     },
 };
 
@@ -539,11 +888,70 @@ export const recap = {
     },
 };
 
+// ---------- Search (journal + chat) ----------
+export const search = {
+    async query(q) {
+        const term = (q || "").trim();
+        if (!term) return { journal: [], chat: [] };
+        if (isCloud()) {
+            const r = await api.get("/search", { params: { q: term } });
+            return r.data || { journal: [], chat: [] };
+        }
+        const re = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+        const items = lsGet(LS.JOURNAL, []).filter((i) =>
+            re.test(i.title || "") ||
+            re.test(i.detail || "") ||
+            re.test(i.transcription || "") ||
+            re.test(i.summary || "")
+        ).slice(0, 50);
+        const chats = lsGet(LS.CHAT, []).filter((m) => re.test(m.content || "")).slice(0, 50);
+        return { journal: items, chat: chats };
+    },
+};
+
+// ---------- Mood timeline ----------
+export const mood = {
+    async timeline(days = 30) {
+        if (isCloud()) {
+            const r = await api.get("/mood/timeline", { params: { days } });
+            return r.data || [];
+        }
+        const since = Date.now() - days * 24 * 3600 * 1000;
+        return lsGet(LS.JOURNAL, [])
+            .filter((i) => (i.type === "voice" || i.type === "text") && i.mood)
+            .filter((i) => new Date(i.created_at).getTime() >= since)
+            .map((i) => ({ created_at: i.created_at, mood: i.mood }))
+            .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+    },
+};
+
 // ---------- Bulk migrate (when user upgrades local → cloud) ----------
 export async function migrateLocalToCloud() {
-    const prof = lsGet(LS.PROFILE, null);
-    if (prof) await api.put("/profile", prof);
-    // Note: full data migration (journal, chat, prompts) is intentionally
-    // skipped to keep the implementation focused. Profile syncs immediately;
-    // subsequent writes will go to cloud.
+    const payload = {
+        profile: lsGet(LS.PROFILE, null),
+        personality_assessments: lsGet(LS.PERSONALITY, []),
+        journal_items: lsGet(LS.JOURNAL, []),
+        ai_messages: lsGet(LS.CHAT, []),
+        daily_prompts: lsGet(LS.PROMPT_HISTORY, []),
+        daily_recaps: lsGet(LS.RECAPS, []),
+        missions: lsGet(LS.MISSIONS, []),
+        mission_progress: lsGet(LS.MISSION_PROGRESS, []),
+    };
+    const r = await api.post("/sync/import", payload);
+    return r.data;
+}
+
+/** Pull all cloud data into local storage (for cloud→local switch). */
+export async function migrateCloudToLocal() {
+    const r = await api.get("/sync/export");
+    const d = r.data || {};
+    if (d.profile) lsSet(LS.PROFILE, d.profile);
+    if (Array.isArray(d.personality_assessments)) lsSet(LS.PERSONALITY, d.personality_assessments);
+    if (Array.isArray(d.journal_items)) lsSet(LS.JOURNAL, d.journal_items);
+    if (Array.isArray(d.ai_messages)) lsSet(LS.CHAT, d.ai_messages);
+    if (Array.isArray(d.daily_prompts)) lsSet(LS.PROMPT_HISTORY, d.daily_prompts);
+    if (Array.isArray(d.daily_recaps)) lsSet(LS.RECAPS, d.daily_recaps);
+    if (Array.isArray(d.missions)) lsSet(LS.MISSIONS, d.missions);
+    if (Array.isArray(d.mission_progress)) lsSet(LS.MISSION_PROGRESS, d.mission_progress);
+    return d;
 }

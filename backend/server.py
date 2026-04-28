@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 import httpx
+import litellm
 from dotenv import load_dotenv
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+from emergentintegrations.llm.chat import LlmChat, UserMessage, get_integration_proxy_url
 from emergentintegrations.llm.openai import OpenAISpeechToText
 from fastapi import (
     APIRouter,
@@ -420,9 +421,13 @@ async def create_voice_note(
 
     extracted = await persist_extracted(note_id, user.user_id, ai)
 
+    # Best-effort mission progress auto-detection (no assumptions: only if confidence high)
+    progress_logged = await maybe_log_mission_progress_for_note(user.user_id, text, note_id) if text else None
+
     return {
         "note": serialize_item(note_doc),
         "extracted": [serialize_item(e) for e in extracted],
+        "mission_progress": progress_logged,
     }
 
 
@@ -448,10 +453,12 @@ async def create_text_note(payload: TextNoteIn, user: User = Depends(get_current
     }
     await db.journal_items.insert_one(note_doc)
     extracted = await persist_extracted(note_id, user.user_id, ai)
+    progress_logged = await maybe_log_mission_progress_for_note(user.user_id, text, note_id)
 
     return {
         "note": serialize_item(note_doc),
         "extracted": [serialize_item(e) for e in extracted],
+        "mission_progress": progress_logged,
     }
 
 
@@ -803,6 +810,7 @@ def _build_chat_system_message(
     recent_moods: list[str],
     behavior: dict | None = None,
     current_mood: str | None = None,
+    missions: list[dict] | None = None,
 ) -> str:
     top_goals = _parse_top_goals((profile or {}).get("goals"))
     identity = (profile or {}).get("aspirations") or ""
@@ -820,13 +828,19 @@ def _build_chat_system_message(
         "1) CLARIFY — sharpen what the user actually means, not just what they say.",
         "2) MIRROR — match their tone, sentence length, and style; remove confusion, reduce excuses, increase clarity.",
         "3) REALITY CHECK — compare goals vs actual behavior. If mismatch, point it out calmly: 'You said this matters, but you haven't worked on it in days.' Never harsh. Never fake-positive.",
-        "4) DIRECT — end with EXACTLY ONE next move, < 15 minutes, specific, aligned to a top goal.",
+        "4) DIRECT — end with EXACTLY ONE next move, < 15 minutes, specific, aligned to a top goal or active mission.",
         "",
         "## DRIFT DETECTION",
         "If repeated avoidance, low-effort, inconsistency: say 'You're drifting from what you said matters.' Then guide back with a small action.",
         "",
         "## TIME REALITY ENGINE",
-        "If the current effort rate cannot reach a goal in 90 days, say so plainly. Offer: increase effort OR reduce scope.",
+        "If the current effort rate cannot reach a goal in the remaining window, say so plainly: 'At your current pace, this will not be completed in this quarter.' Offer: increase effort OR reduce scope.",
+        "",
+        "## MISSIONS — REAL PROGRESS, NO ASSUMPTIONS",
+        "If active missions are listed below, use ONLY the numbers provided to evaluate progress. Never invent or assume progress that isn't in the data.",
+        "If the user mentions a track by name (e.g., a book or module), reference it specifically: 'You've barely progressed on Atomic Habits this week.'",
+        "If a mission is BEHIND, name the gap. If ON_TRACK, briefly reinforce. If AHEAD, acknowledge then push for sustainability.",
+        "Tie the 🎯 Next Move to one of the active missions/tracks whenever possible.",
         "",
         "## MOOD-AWARE TONE",
         "If LOW mood (sad/stressed): softer tone, smaller next step.",
@@ -840,7 +854,7 @@ def _build_chat_system_message(
         "2. A reality insight (only if needed — 1 sentence calling out drift, mismatch, or pace).",
         "3. A direction sentence (where they should go next).",
         "4. A blank line, then exactly: '🎯 Next Move: <one specific action under 15 minutes>'.",
-        "Keep total length tight — under ~100 words.",
+        "Keep total length tight — under ~110 words.",
     ]
 
     # Structured context inputs
@@ -868,6 +882,28 @@ def _build_chat_system_message(
                 f"strengths: {', '.join(personality.get('strengths') or [])[:240]}; "
                 f"growth areas: {', '.join(personality.get('growth_areas') or [])[:240]}."
             )
+
+    # Active missions (with stats)
+    if missions:
+        ctx.append("- ACTIVE MISSIONS (use real numbers, do NOT assume):")
+        for m in missions[:3]:
+            stats = m.get("stats") or {}
+            ctx.append(
+                f"  • {m.get('title')} — {m.get('outcome') or '(no outcome)'} "
+                f"[pace={stats.get('pace','unknown')}, "
+                f"{stats.get('logged_units',0):.0f}/{stats.get('target_units',0):.0f} units, "
+                f"{stats.get('percent_complete',0):.0f}%, "
+                f"{stats.get('days_remaining','?')}d remaining, "
+                f"consistency={stats.get('consistency_pct',0):.0f}%, "
+                f"days_since_last_progress={stats.get('days_since_last_progress')}]"
+            )
+            for tr in stats.get("tracks") or []:
+                ctx.append(
+                    f"      - track '{tr.get('title')}': "
+                    f"{tr.get('logged_units',0):.0f}/{tr.get('target_units',0):.0f} "
+                    f"{tr.get('unit_label','units')} ({tr.get('percent',0):.0f}%, "
+                    f"{tr.get('entries_count',0)} entries)"
+                )
 
     # Behavior signals (last 7 days)
     if behavior:
@@ -934,12 +970,19 @@ async def chat_send(payload: dict, user: User = Depends(get_current_user)):
     ).sort("created_at", -1).to_list(length=400)
     behavior = _compute_behavior_signals_from_items(items_for_signals)
 
+    # Active missions with stats
+    mission_docs = await db.missions.find(
+        {"user_id": user.user_id, "is_active": True}, {"_id": 0}
+    ).sort("created_at", -1).limit(3).to_list(length=3)
+    missions_with_stats = [await _serialize_mission(m) for m in mission_docs]
+
     # Detect current mood from this message via cheap heuristic — avoids
     # a second LLM round-trip per chat send (saves ~3-6s).
     current_mood = _infer_mood_quick(message)
 
     sys_msg = _build_chat_system_message(
-        profile, personality_doc, moods, behavior=behavior, current_mood=current_mood
+        profile, personality_doc, moods,
+        behavior=behavior, current_mood=current_mood, missions=missions_with_stats,
     )
 
     # History — keep last 16 turns for context
@@ -1169,9 +1212,11 @@ async def stateless_chat(payload: dict, user: User = Depends(get_current_user)):
     moods = payload.get("recent_moods") or []
     behavior = payload.get("behavior") or None
     current_mood = payload.get("current_mood") or None
+    missions = payload.get("missions") or None
 
     sys_msg = _build_chat_system_message(
-        profile, personality, moods, behavior=behavior, current_mood=current_mood
+        profile, personality, moods,
+        behavior=behavior, current_mood=current_mood, missions=missions,
     )
     convo = ""
     for m in history[-16:]:
@@ -1354,6 +1399,10 @@ async def admin_set_role(target_user_id: str, payload: dict, admin: User = Depen
                    "role_updated_by": admin.user_id}},
     )
     doc = await db.users.find_one({"user_id": target_user_id}, {"_id": 0})
+    await _audit(admin, "set_role", target_user_id, {
+        "from": target.get("role", "user"), "to": new_role,
+        "target_email": doc.get("email"), "target_name": doc.get("name"),
+    })
     return {
         "user_id": doc["user_id"],
         "email": doc["email"],
@@ -1375,6 +1424,10 @@ async def admin_delete_user(target_user_id: str, admin: User = Depends(get_super
                 "journal_items", "audio_blobs", "storage_prefs"):
         await db[col].delete_many({"user_id": target_user_id})
     await db.users.delete_one({"user_id": target_user_id})
+    await _audit(admin, "delete_user", target_user_id, {
+        "target_email": target.get("email"), "target_name": target.get("name"),
+        "target_role": target.get("role", "user"),
+    })
     return {"ok": True}
 
 
@@ -1393,10 +1446,765 @@ async def admin_stats(admin: User = Depends(get_admin_user)):
     }
 
 
+# ---------------------------- Missions (Quarterly Goals) ----------------------------
+MAX_ACTIVE_MISSIONS = 3
+EFFORTS = {"low", "medium", "deep"}
+
+
+def _compute_mission_stats(mission: dict, progress_entries: list[dict]) -> dict:
+    """Pace, consistency, effort distribution. Pure function — no assumptions, only evidence."""
+    now = datetime.now(timezone.utc)
+    start = parse_dt(mission.get("start_at")) or parse_dt(mission.get("created_at")) or now
+    target = parse_dt(mission.get("target_date"))
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if target and target.tzinfo is None:
+        target = target.replace(tzinfo=timezone.utc)
+
+    total_days = max(1, ((target - start).days)) if target else None
+    elapsed_days = max(0, (now - start).days)
+    days_remaining = max(0, ((target - now).days)) if target else None
+
+    # Per-track progress
+    tracks_out = []
+    grand_logged = 0.0
+    grand_target = 0.0
+    for tr in mission.get("tracks") or []:
+        tr_entries = [e for e in progress_entries if e.get("track_id") == tr.get("id")]
+        logged = sum(float(e.get("units") or 0) for e in tr_entries)
+        target_units = float(tr.get("target_units") or 0)
+        grand_logged += logged
+        grand_target += target_units
+        tracks_out.append({
+            "id": tr.get("id"),
+            "title": tr.get("title"),
+            "unit_label": tr.get("unit_label") or "units",
+            "target_units": target_units,
+            "logged_units": logged,
+            "percent": min(100.0, (logged / target_units * 100.0) if target_units else 0.0),
+            "entries_count": len(tr_entries),
+            "last_logged_at": max((e.get("created_at") for e in tr_entries), default=None),
+        })
+
+    # Pace status (overall)
+    if grand_target and total_days:
+        expected_today = grand_target * (elapsed_days / total_days) if total_days else 0
+        if grand_logged >= expected_today * 1.05:
+            pace = "ahead"
+        elif grand_logged >= expected_today * 0.85:
+            pace = "on_track"
+        else:
+            pace = "behind"
+    else:
+        pace = "unknown"
+        expected_today = 0
+
+    # Consistency — distinct day-keys with progress / elapsed_days
+    days_with = {((e.get("created_at") or "")[:10]) for e in progress_entries if e.get("created_at")}
+    days_with.discard("")
+    consistency_pct = (len(days_with) / max(1, elapsed_days) * 100.0) if elapsed_days else 0.0
+
+    # Effort distribution
+    effort_counts = {"low": 0, "medium": 0, "deep": 0}
+    for e in progress_entries:
+        eff = e.get("effort")
+        if eff in effort_counts:
+            effort_counts[eff] += 1
+
+    last_logged_at = max((e.get("created_at") for e in progress_entries), default=None)
+    days_since_last = None
+    if last_logged_at:
+        try:
+            dl = parse_dt(last_logged_at)
+            if dl and dl.tzinfo is None:
+                dl = dl.replace(tzinfo=timezone.utc)
+            if dl:
+                days_since_last = (now - dl).days
+        except Exception:
+            pass
+
+    return {
+        "tracks": tracks_out,
+        "logged_units": grand_logged,
+        "target_units": grand_target,
+        "expected_units_today": round(expected_today, 1),
+        "percent_complete": min(100.0, (grand_logged / grand_target * 100.0) if grand_target else 0.0),
+        "elapsed_days": elapsed_days,
+        "days_remaining": days_remaining,
+        "total_days": total_days,
+        "pace": pace,
+        "consistency_pct": round(consistency_pct, 1),
+        "effort_counts": effort_counts,
+        "days_since_last_progress": days_since_last,
+        "entries_count": len(progress_entries),
+    }
+
+
+async def _serialize_mission(mission: dict) -> dict:
+    progress = await db.mission_progress.find(
+        {"mission_id": mission["id"]}, {"_id": 0}
+    ).sort("created_at", -1).limit(500).to_list(length=500)
+    stats = _compute_mission_stats(mission, progress)
+    return {
+        "id": mission["id"],
+        "user_id": mission["user_id"],
+        "title": mission.get("title"),
+        "outcome": mission.get("outcome"),
+        "target_date": mission.get("target_date"),
+        "start_at": mission.get("start_at"),
+        "is_active": mission.get("is_active", True),
+        "tracks": mission.get("tracks") or [],
+        "stats": stats,
+        "created_at": mission.get("created_at"),
+    }
+
+
+@api.get("/missions")
+async def list_missions(user: User = Depends(get_current_user)):
+    cursor = db.missions.find({"user_id": user.user_id}, {"_id": 0}).sort("created_at", -1).limit(20)
+    docs = await cursor.to_list(length=20)
+    return [await _serialize_mission(m) for m in docs]
+
+
+@api.post("/missions")
+async def create_mission(payload: dict, user: User = Depends(get_current_user)):
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Mission title required")
+    active_count = await db.missions.count_documents({"user_id": user.user_id, "is_active": True})
+    if active_count >= MAX_ACTIVE_MISSIONS:
+        raise HTTPException(status_code=400, detail=f"Max {MAX_ACTIVE_MISSIONS} active missions; archive one first")
+
+    tracks_in = payload.get("tracks") or []
+    tracks: list[dict] = []
+    for t in tracks_in[:6]:  # cap tracks per mission
+        t_title = (t.get("title") or "").strip()
+        if not t_title:
+            continue
+        tracks.append({
+            "id": f"trk_{uuid.uuid4().hex[:10]}",
+            "title": t_title[:120],
+            "target_units": float(t.get("target_units") or 0),
+            "unit_label": (t.get("unit_label") or "units").strip()[:24],
+            "is_active": True,
+        })
+
+    target_date = parse_dt(payload.get("target_date"))
+    now = datetime.now(timezone.utc)
+    doc = {
+        "id": f"msn_{uuid.uuid4().hex[:12]}",
+        "user_id": user.user_id,
+        "title": title[:160],
+        "outcome": (payload.get("outcome") or "")[:400],
+        "target_date": target_date.isoformat() if target_date else None,
+        "start_at": now.isoformat(),
+        "is_active": True,
+        "tracks": tracks,
+        "created_at": now.isoformat(),
+    }
+    await db.missions.insert_one(dict(doc))
+    return await _serialize_mission(doc)
+
+
+@api.patch("/missions/{mission_id}")
+async def update_mission(mission_id: str, payload: dict, user: User = Depends(get_current_user)):
+    updates: dict = {}
+    if "title" in payload:
+        updates["title"] = str(payload["title"])[:160]
+    if "outcome" in payload:
+        updates["outcome"] = str(payload["outcome"])[:400]
+    if "target_date" in payload:
+        d = parse_dt(payload["target_date"])
+        updates["target_date"] = d.isoformat() if d else None
+    if "is_active" in payload:
+        updates["is_active"] = bool(payload["is_active"])
+    if "tracks" in payload:
+        new_tracks = []
+        for t in (payload["tracks"] or [])[:6]:
+            new_tracks.append({
+                "id": t.get("id") or f"trk_{uuid.uuid4().hex[:10]}",
+                "title": str(t.get("title") or "").strip()[:120],
+                "target_units": float(t.get("target_units") or 0),
+                "unit_label": (t.get("unit_label") or "units").strip()[:24],
+                "is_active": bool(t.get("is_active", True)),
+            })
+        updates["tracks"] = [t for t in new_tracks if t["title"]]
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid fields")
+    res = await db.missions.update_one(
+        {"id": mission_id, "user_id": user.user_id}, {"$set": updates}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    doc = await db.missions.find_one({"id": mission_id, "user_id": user.user_id}, {"_id": 0})
+    return await _serialize_mission(doc)
+
+
+@api.delete("/missions/{mission_id}")
+async def delete_mission(mission_id: str, user: User = Depends(get_current_user)):
+    await db.missions.delete_one({"id": mission_id, "user_id": user.user_id})
+    await db.mission_progress.delete_many({"mission_id": mission_id, "user_id": user.user_id})
+    return {"ok": True}
+
+
+@api.get("/missions/{mission_id}/progress")
+async def list_mission_progress(mission_id: str, user: User = Depends(get_current_user)):
+    cursor = db.mission_progress.find(
+        {"mission_id": mission_id, "user_id": user.user_id}, {"_id": 0}
+    ).sort("created_at", -1).limit(200)
+    return await cursor.to_list(length=200)
+
+
+@api.post("/missions/{mission_id}/progress")
+async def log_mission_progress(mission_id: str, payload: dict, user: User = Depends(get_current_user)):
+    mission = await db.missions.find_one({"id": mission_id, "user_id": user.user_id}, {"_id": 0})
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found")
+    track_id = payload.get("track_id")
+    if track_id:
+        if not any(t.get("id") == track_id for t in mission.get("tracks") or []):
+            raise HTTPException(status_code=400, detail="Track not found in mission")
+    units = float(payload.get("units") or 0)
+    if units <= 0:
+        raise HTTPException(status_code=400, detail="units must be > 0")
+    effort = payload.get("effort") or "medium"
+    if effort not in EFFORTS:
+        raise HTTPException(status_code=400, detail="effort must be low/medium/deep")
+    entry = {
+        "id": f"prg_{uuid.uuid4().hex[:12]}",
+        "user_id": user.user_id,
+        "mission_id": mission_id,
+        "track_id": track_id,
+        "units": units,
+        "effort": effort,
+        "note": (payload.get("note") or "")[:400],
+        "journal_item_id": payload.get("journal_item_id"),
+        "detected": bool(payload.get("detected", False)),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.mission_progress.insert_one(dict(entry))
+    return entry
+
+
+@api.delete("/missions/progress/{entry_id}")
+async def delete_progress(entry_id: str, user: User = Depends(get_current_user)):
+    await db.mission_progress.delete_one({"id": entry_id, "user_id": user.user_id})
+    return {"ok": True}
+
+
+# ---------------------------- AI Mission detection ----------------------------
+DETECT_PROGRESS_SYSTEM = (
+    "You are a strict progress detector. Given the user's text and their active missions/tracks, "
+    "return ONLY JSON of this shape: "
+    '{"mission_id": <string id or null>, "track_id": <string id or null>, '
+    '"units": <number, e.g. pages/problems/sessions; 0 if not stated>, '
+    '"effort": "low" | "medium" | "deep", '
+    '"confidence": <number 0..1>, '
+    '"note": <short summary or null>}. '
+    "Rules: NEVER guess. If the user did not clearly mention activity tied to one of the listed missions/tracks, "
+    "return mission_id=null and confidence<=0.3. Match track titles loosely (case-insensitive, allow partial words). "
+    "Effort: 'deep' = 45+ minutes of focused work or hard problems; 'medium' = 15-45 min or routine progress; "
+    "'low' = under 15 min or shallow review. NEVER include text outside JSON."
+)
+
+
+async def detect_mission_progress(text: str, missions: list[dict]) -> dict | None:
+    if not text or not missions:
+        return None
+    catalog_lines = []
+    for m in missions:
+        if not m.get("is_active", True):
+            continue
+        track_lines = []
+        for t in m.get("tracks") or []:
+            track_lines.append(f'    track {t.get("id")}: "{t.get("title")}" (target {t.get("target_units")} {t.get("unit_label")})')
+        catalog_lines.append(f'  mission {m.get("id")}: "{m.get("title")}" — {m.get("outcome") or ""}')
+        if track_lines:
+            catalog_lines.extend(track_lines)
+    catalog = "\n".join(catalog_lines) or "(no missions)"
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"detect-{uuid.uuid4().hex[:8]}",
+        system_message=DETECT_PROGRESS_SYSTEM,
+    ).with_model("openai", "gpt-5.2")
+    msg = UserMessage(text=f"Active missions:\n{catalog}\n\nUser said: {text}")
+    try:
+        raw = (await chat.send_message(msg)).strip()
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not m:
+            return None
+        data = json.loads(m.group(0))
+    except Exception as e:
+        logger.warning("detect_mission_progress error: %s", e)
+        return None
+    # Validate
+    mid = data.get("mission_id")
+    if mid and not any(mm.get("id") == mid for mm in missions):
+        return None
+    tid = data.get("track_id")
+    if tid:
+        ok = False
+        for mm in missions:
+            if any(t.get("id") == tid for t in mm.get("tracks") or []):
+                ok = True
+                break
+        if not ok:
+            tid = None
+            data["track_id"] = None
+    eff = data.get("effort")
+    if eff not in EFFORTS:
+        data["effort"] = "medium"
+    try:
+        data["units"] = float(data.get("units") or 0)
+    except Exception:
+        data["units"] = 0
+    try:
+        data["confidence"] = float(data.get("confidence") or 0)
+    except Exception:
+        data["confidence"] = 0
+    return data
+
+
+async def maybe_log_mission_progress_for_note(user_id: str, text: str, journal_item_id: str) -> dict | None:
+    missions = await db.missions.find(
+        {"user_id": user_id, "is_active": True}, {"_id": 0}
+    ).to_list(length=10)
+    if not missions:
+        return None
+    detection = await detect_mission_progress(text, missions)
+    if not detection or detection.get("confidence", 0) < 0.55:
+        return None
+    if not detection.get("mission_id") or float(detection.get("units") or 0) <= 0:
+        return None
+    entry = {
+        "id": f"prg_{uuid.uuid4().hex[:12]}",
+        "user_id": user_id,
+        "mission_id": detection["mission_id"],
+        "track_id": detection.get("track_id"),
+        "units": float(detection["units"]),
+        "effort": detection.get("effort", "medium"),
+        "note": (detection.get("note") or "")[:400],
+        "journal_item_id": journal_item_id,
+        "detected": True,
+        "confidence": detection.get("confidence"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.mission_progress.insert_one(dict(entry))
+    return entry
+
+
+@api.post("/ai/detect-progress")
+async def stateless_detect_progress(payload: dict, user: User = Depends(get_current_user)):
+    text = (payload.get("text") or "").strip()
+    missions = payload.get("missions") or []
+    if not text:
+        raise HTTPException(status_code=400, detail="Empty text")
+    detection = await detect_mission_progress(text, missions)
+    return detection or {"mission_id": None, "track_id": None, "units": 0, "effort": "medium", "confidence": 0}
+
+
 # ---------------------------- Health ----------------------------
 @api.get("/")
 async def root():
     return {"service": "pericl", "status": "ok"}
+
+
+# ---------------------------- Streaming chat (SSE) ----------------------------
+async def _stream_llm_chat(system_msg: str, convo: str, model: str = "gpt-5.2"):
+    """Yield text deltas from an LLM call using litellm + Emergent proxy."""
+    params = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": convo},
+        ],
+        "api_key": EMERGENT_LLM_KEY,
+        "stream": True,
+        "api_base": get_integration_proxy_url() + "/llm",
+        "custom_llm_provider": "openai",
+    }
+    try:
+        resp = await litellm.acompletion(**params)
+        async for chunk in resp:
+            try:
+                delta = chunk.choices[0].delta.content or ""
+            except Exception:
+                delta = ""
+            if delta:
+                yield delta
+    except Exception as e:
+        logger.warning("stream error: %s", e)
+        yield "\n\n🎯 Next Move: Write one sentence about what's actually on your mind."
+
+
+def _sse(data: str) -> bytes:
+    # Server-Sent Event line. Use 'data:' frames with newline encoding.
+    safe = data.replace("\r", "")
+    return f"data: {json.dumps({'delta': safe})}\n\n".encode()
+
+
+@api.post("/ai/chat/stream")
+async def chat_send_stream(payload: dict, user: User = Depends(get_current_user)):
+    """SSE endpoint — streams the Mirror's reply token-by-token. Persists to db once complete."""
+    message = (payload.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Empty message")
+
+    user_msg = {
+        "id": f"m_{uuid.uuid4().hex[:12]}",
+        "user_id": user.user_id,
+        "role": "user",
+        "content": message,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.ai_messages.insert_one(dict(user_msg))
+
+    profile = await db.user_profiles.find_one({"user_id": user.user_id}, {"_id": 0})
+    personality_doc = await db.personality_assessments.find_one(
+        {"user_id": user.user_id}, {"_id": 0}, sort=[("created_at", -1)]
+    )
+    recent_journal = await db.journal_items.find(
+        {"user_id": user.user_id, "type": {"$in": ["voice", "text"]}}, {"_id": 0, "mood": 1}
+    ).sort("created_at", -1).limit(8).to_list(length=8)
+    moods = [j.get("mood") for j in recent_journal if j.get("mood")]
+    fourteen_days_ago = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+    items_for_signals = await db.journal_items.find(
+        {"user_id": user.user_id, "created_at": {"$gte": fourteen_days_ago}}, {"_id": 0}
+    ).sort("created_at", -1).to_list(length=400)
+    behavior = _compute_behavior_signals_from_items(items_for_signals)
+    mission_docs = await db.missions.find(
+        {"user_id": user.user_id, "is_active": True}, {"_id": 0}
+    ).sort("created_at", -1).limit(3).to_list(length=3)
+    missions_with_stats = [await _serialize_mission(m) for m in mission_docs]
+    current_mood = _infer_mood_quick(message)
+
+    sys_msg = _build_chat_system_message(
+        profile, personality_doc, moods,
+        behavior=behavior, current_mood=current_mood, missions=missions_with_stats,
+    )
+    history_cursor = db.ai_messages.find({"user_id": user.user_id}, {"_id": 0}).sort("created_at", -1).limit(16)
+    hist = list(reversed(await history_cursor.to_list(length=16)))
+    convo = ""
+    for m in hist[:-1]:
+        prefix = "User" if m["role"] == "user" else "PericL"
+        convo += f"{prefix}: {m['content']}\n"
+    convo += f"User: {message}"
+
+    asst_id = f"m_{uuid.uuid4().hex[:12]}"
+
+    async def gen():
+        # First frame: send the user message id + assistant id so the client can reconcile
+        yield f"data: {json.dumps({'meta': {'user_message_id': user_msg['id'], 'assistant_message_id': asst_id}})}\n\n".encode()
+        full = []
+        async for delta in _stream_llm_chat(sys_msg, convo):
+            full.append(delta)
+            yield _sse(delta)
+        reply = ("".join(full)).strip() or "Take a breath. Try that again in a moment.\n\n🎯 Next Move: Write one sentence about what's actually on your mind."
+        await db.ai_messages.insert_one({
+            "id": asst_id,
+            "user_id": user.user_id,
+            "role": "assistant",
+            "content": reply,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+        yield b"data: [DONE]\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+    })
+
+
+@api.post("/ai/chat-stateless/stream")
+async def stateless_chat_stream(payload: dict, user: User = Depends(get_current_user)):
+    """Streaming variant of chat-stateless — caller supplies all context, server stores nothing."""
+    message = (payload.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Empty message")
+    history = payload.get("history") or []
+    profile = payload.get("profile") or None
+    personality = payload.get("personality") or None
+    moods = payload.get("recent_moods") or []
+    behavior = payload.get("behavior") or None
+    current_mood = payload.get("current_mood") or None
+    missions = payload.get("missions") or None
+
+    sys_msg = _build_chat_system_message(
+        profile, personality, moods,
+        behavior=behavior, current_mood=current_mood, missions=missions,
+    )
+    convo = ""
+    for m in history[-16:]:
+        prefix = "User" if m.get("role") == "user" else "PericL"
+        convo += f"{prefix}: {m.get('content','')}\n"
+    convo += f"User: {message}"
+
+    async def gen():
+        async for delta in _stream_llm_chat(sys_msg, convo):
+            yield _sse(delta)
+        yield b"data: [DONE]\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+    })
+
+
+# ---------------------------- Search (journal + chat) ----------------------------
+@api.get("/search")
+async def search_all(q: str = "", user: User = Depends(get_current_user)):
+    q = (q or "").strip()
+    if not q:
+        return {"journal": [], "chat": []}
+    rx = {"$regex": re.escape(q), "$options": "i"}
+    journal_docs = await db.journal_items.find(
+        {
+            "user_id": user.user_id,
+            "$or": [
+                {"title": rx}, {"detail": rx}, {"transcription": rx}, {"summary": rx},
+            ],
+        },
+        {"_id": 0},
+    ).sort("created_at", -1).limit(50).to_list(length=50)
+    chat_docs = await db.ai_messages.find(
+        {"user_id": user.user_id, "content": rx}, {"_id": 0}
+    ).sort("created_at", -1).limit(50).to_list(length=50)
+    return {
+        "journal": [serialize_item(d) for d in journal_docs],
+        "chat": chat_docs,
+    }
+
+
+# ---------------------------- Big Five (OCEAN) ----------------------------
+BIG_FIVE_TRAITS = ["O", "C", "E", "A", "N"]
+BIG_FIVE_NAMES = {
+    "O": "Openness",
+    "C": "Conscientiousness",
+    "E": "Extraversion",
+    "A": "Agreeableness",
+    "N": "Neuroticism",
+}
+
+
+def compute_big_five(answers: list[dict]) -> dict:
+    """Each answer: {trait: 'O'|'C'|'E'|'A'|'N', score: 1..5, reverse: bool}.
+    Returns per-trait normalized score 0..100."""
+    sums: dict[str, list[int]] = {t: [] for t in BIG_FIVE_TRAITS}
+    for a in answers or []:
+        t = a.get("trait")
+        s = a.get("score")
+        if t not in sums or not isinstance(s, (int, float)):
+            continue
+        s = max(1, min(5, int(s)))
+        if a.get("reverse"):
+            s = 6 - s
+        sums[t].append(s)
+    out = {}
+    for t, items in sums.items():
+        if not items:
+            out[t] = 0
+        else:
+            avg = sum(items) / len(items)  # 1..5
+            out[t] = round((avg - 1) / 4 * 100)
+    return out
+
+
+async def ai_big_five_analysis(scores: dict, profile: dict | None) -> dict:
+    name = (profile or {}).get("name") or "this person"
+    sys = (
+        "You are the user's own reflective voice writing back to them. Given Big Five scores (0-100 each), "
+        "return ONLY JSON: {\"description\": str (2-3 sentences in second-person warm voice, like a self-portrait), "
+        "\"strengths\": [str, str, str, str], \"growth_areas\": [str, str, str, str] }. "
+        "Never mention being an AI or assistant."
+    )
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"bigfive-{uuid.uuid4().hex[:8]}", system_message=sys).with_model("openai", "gpt-5.2")
+    score_text = ", ".join(f"{BIG_FIVE_NAMES[t]}={scores.get(t,0)}" for t in BIG_FIVE_TRAITS)
+    msg = UserMessage(text=f"Name: {name}\nScores: {score_text}")
+    try:
+        raw = (await chat.send_message(msg)).strip()
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if m:
+            return json.loads(m.group(0))
+    except Exception as e:
+        logger.warning("big five analysis fallback: %s", e)
+    return {
+        "description": "You hold a unique blend of openness, discipline, energy, warmth and emotional weather.",
+        "strengths": [],
+        "growth_areas": [],
+    }
+
+
+@api.post("/personality/big-five-assess")
+async def submit_big_five(payload: dict, user: User = Depends(get_current_user)):
+    answers = payload.get("answers") or []
+    if not answers:
+        raise HTTPException(status_code=400, detail="No answers")
+    scores = compute_big_five(answers)
+    profile = await db.user_profiles.find_one({"user_id": user.user_id}, {"_id": 0})
+    analysis = await ai_big_five_analysis(scores, profile)
+    rec = {
+        "id": f"pa_{uuid.uuid4().hex[:12]}",
+        "user_id": user.user_id,
+        "framework": "big_five",
+        "personality_type": "BIG5",
+        "type_name": "Big Five",
+        "description": analysis.get("description", ""),
+        "strengths": analysis.get("strengths", []),
+        "growth_areas": analysis.get("growth_areas", []),
+        "scores": {t: int(scores.get(t, 0)) for t in BIG_FIVE_TRAITS},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.personality_assessments.insert_one(dict(rec))
+    return rec
+
+
+@api.post("/ai/big-five-analyze")
+async def stateless_big_five(payload: dict, user: User = Depends(get_current_user)):
+    answers = payload.get("answers") or []
+    if not answers:
+        raise HTTPException(status_code=400, detail="No answers")
+    scores = compute_big_five(answers)
+    profile = payload.get("profile") or {}
+    analysis = await ai_big_five_analysis(scores, profile)
+    return {
+        "framework": "big_five",
+        "personality_type": "BIG5",
+        "type_name": "Big Five",
+        "description": analysis.get("description", ""),
+        "strengths": analysis.get("strengths", []),
+        "growth_areas": analysis.get("growth_areas", []),
+        "scores": {t: int(scores.get(t, 0)) for t in BIG_FIVE_TRAITS},
+    }
+
+
+# ---------------------------- Mood timeline ----------------------------
+@api.get("/mood/timeline")
+async def mood_timeline(days: int = 30, user: User = Depends(get_current_user)):
+    days = max(1, min(180, int(days or 30)))
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    cursor = db.journal_items.find(
+        {
+            "user_id": user.user_id,
+            "type": {"$in": ["voice", "text"]},
+            "created_at": {"$gte": since},
+            "mood": {"$ne": None},
+        },
+        {"_id": 0, "mood": 1, "created_at": 1},
+    ).sort("created_at", 1)
+    items = await cursor.to_list(length=2000)
+    return [{"created_at": i.get("created_at"), "mood": i.get("mood")} for i in items if i.get("mood")]
+
+
+# ---------------------------- Bidirectional sync ----------------------------
+@api.post("/sync/import")
+async def sync_import(payload: dict, user: User = Depends(get_current_user)):
+    """Import local data into the cloud. Idempotent on `id` per collection.
+    Accepts: profile, personality_assessments, journal_items, ai_messages, daily_prompts, daily_recaps, missions, mission_progress.
+    """
+    counts: dict[str, int] = {}
+    prof = payload.get("profile")
+    if isinstance(prof, dict):
+        update = {k: v for k, v in prof.items() if k in PROFILE_FIELDS}
+        if update:
+            update["user_id"] = user.user_id
+            update["updated_at"] = datetime.now(timezone.utc).isoformat()
+            await db.user_profiles.update_one(
+                {"user_id": user.user_id},
+                {"$set": update, "$setOnInsert": {"created_at": datetime.now(timezone.utc).isoformat(), "onboarding_completed": True}},
+                upsert=True,
+            )
+            counts["profile"] = 1
+
+    async def _bulk(coll, docs, allow_keys):
+        n = 0
+        for d in docs or []:
+            if not isinstance(d, dict) or not d.get("id"):
+                continue
+            doc = {k: d.get(k) for k in allow_keys if k in d}
+            doc["id"] = d["id"]
+            doc["user_id"] = user.user_id
+            # created_at must only live in $setOnInsert to avoid "path conflict" on upsert
+            created_at_val = doc.pop("created_at", None) or datetime.now(timezone.utc).isoformat()
+            await db[coll].update_one(
+                {"id": doc["id"], "user_id": user.user_id},
+                {"$set": doc, "$setOnInsert": {"created_at": created_at_val}},
+                upsert=True,
+            )
+            n += 1
+        return n
+
+    counts["personality_assessments"] = await _bulk(
+        "personality_assessments", payload.get("personality_assessments"),
+        ["id", "framework", "personality_type", "type_name", "description", "strengths", "growth_areas", "scores", "created_at"],
+    )
+    counts["journal_items"] = await _bulk(
+        "journal_items", payload.get("journal_items"),
+        ["id", "type", "title", "detail", "audio_id", "duration", "transcription", "summary", "priority", "due_at", "completed", "parent_id", "mood", "created_at"],
+    )
+    counts["ai_messages"] = await _bulk(
+        "ai_messages", payload.get("ai_messages"),
+        ["id", "role", "content", "created_at"],
+    )
+    counts["daily_prompts"] = await _bulk(
+        "daily_prompts", payload.get("daily_prompts"),
+        ["id", "prompt_date", "prompt_text", "prompt_type", "response_text", "is_completed", "completed_at", "created_at"],
+    )
+    counts["daily_recaps"] = await _bulk(
+        "daily_recaps", payload.get("daily_recaps"),
+        ["id", "recap_date", "summary", "voice_count", "task_count", "reminder_count", "idea_count", "created_at"],
+    )
+    counts["missions"] = await _bulk(
+        "missions", payload.get("missions"),
+        ["id", "title", "outcome", "target_date", "start_at", "is_active", "tracks", "created_at"],
+    )
+    counts["mission_progress"] = await _bulk(
+        "mission_progress", payload.get("mission_progress"),
+        ["id", "mission_id", "track_id", "units", "effort", "note", "journal_item_id", "detected", "confidence", "created_at"],
+    )
+    return {"ok": True, "counts": counts}
+
+
+@api.get("/sync/export")
+async def sync_export(user: User = Depends(get_current_user)):
+    """Export all of the user's cloud data — used when switching cloud → local."""
+    async def _all(coll):
+        return await db[coll].find({"user_id": user.user_id}, {"_id": 0}).to_list(length=5000)
+
+    profile = await db.user_profiles.find_one({"user_id": user.user_id}, {"_id": 0})
+    return {
+        "profile": profile,
+        "personality_assessments": await _all("personality_assessments"),
+        "journal_items": await _all("journal_items"),
+        "ai_messages": await _all("ai_messages"),
+        "daily_prompts": await _all("daily_prompts"),
+        "daily_recaps": await _all("daily_recaps"),
+        "missions": await _all("missions"),
+        "mission_progress": await _all("mission_progress"),
+    }
+
+
+# ---------------------------- Admin audit log ----------------------------
+async def _audit(actor: User, action: str, target_user_id: str | None = None, meta: dict | None = None):
+    try:
+        await db.admin_audit_log.insert_one({
+            "id": f"al_{uuid.uuid4().hex[:12]}",
+            "actor_user_id": actor.user_id,
+            "actor_email": actor.email,
+            "actor_role": actor.role,
+            "action": action,
+            "target_user_id": target_user_id,
+            "meta": meta or {},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        logger.warning("audit log failed: %s", e)
+
+
+@api.get("/admin/audit-log")
+async def admin_audit_log(limit: int = 100, admin: User = Depends(get_admin_user)):
+    limit = max(1, min(500, int(limit or 100)))
+    cursor = db.admin_audit_log.find({}, {"_id": 0}).sort("created_at", -1).limit(limit)
+    return await cursor.to_list(length=limit)
 
 
 app.include_router(api)

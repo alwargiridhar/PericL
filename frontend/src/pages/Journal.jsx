@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Mic } from "lucide-react";
+import { Mic, Bell } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import Header from "@/components/Header";
 import VoiceDock from "@/components/VoiceDock";
@@ -8,6 +8,7 @@ import RecapDrawer from "@/components/RecapDrawer";
 import Footer from "@/components/Footer";
 import CloudSyncPrompt from "@/components/CloudSyncPrompt";
 import { journal } from "@/lib/storage";
+import usePushReminders, { pushPermission, requestPushPermission } from "@/hooks/usePushReminders";
 
 export default function Journal() {
     const [items, setItems] = useState([]);
@@ -75,6 +76,10 @@ export default function Journal() {
             const extracted = data?.extracted || [];
             setItems((prev) => [...[...extracted].reverse(), note, ...prev]);
             toast.success(extracted.length ? `Saved + ${extracted.length} item${extracted.length > 1 ? "s" : ""}` : "Saved");
+            if (data?.mission_progress) {
+                const p = data.mission_progress;
+                toast(`+${Math.round(p.units)} ${p.unit_label || ""} logged toward your mission`, { duration: 4000 });
+            }
         } catch {
             toast.error("Could not save voice note");
         } finally {
@@ -90,6 +95,10 @@ export default function Journal() {
             const extracted = data?.extracted || [];
             setItems((prev) => [...[...extracted].reverse(), note, ...prev]);
             if (extracted.length) toast.success(`Sorted into ${extracted.length} item${extracted.length > 1 ? "s" : ""}`);
+            if (data?.mission_progress) {
+                const p = data.mission_progress;
+                toast(`+${Math.round(p.units)} ${p.unit_label || ""} logged toward your mission`, { duration: 4000 });
+            }
         } catch {
             toast.error("Could not save note");
         } finally {
@@ -116,6 +125,34 @@ export default function Journal() {
         }
     };
 
+    const snoozeItem = async (item, at) => {
+        try {
+            const updated = await journal.update(item.id, { due_at: at.toISOString() });
+            setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)));
+            firedRemindersRef.current.delete(item.id);
+            toast.success(`Snoozed to ${at.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`);
+        } catch {
+            toast.error("Could not snooze");
+        }
+    };
+
+    // Native push notifications for upcoming reminders (foreground)
+    usePushReminders(items, (it) => {
+        firedRemindersRef.current.add(it.id);
+    });
+
+    const [pushPerm, setPushPerm] = useState(() => pushPermission());
+    const enablePush = useCallback(async () => {
+        const r = await requestPushPermission();
+        setPushPerm(r);
+        if (r === "granted") toast.success("Reminders will notify you here");
+        else if (r === "denied") toast("Notifications blocked — enable them from your browser settings");
+    }, []);
+    const showPushBanner = useMemo(() => {
+        if (pushPerm !== "default") return false;
+        return (items || []).some((i) => i.type === "reminder" && !i.completed && i.due_at);
+    }, [items, pushPerm]);
+
     const empty = !loading && items.length === 0;
 
     return (
@@ -128,6 +165,21 @@ export default function Journal() {
             <Header onOpenRecaps={() => setRecapOpen(true)} />
 
             <main className="relative z-10 flex-1 max-w-2xl w-full mx-auto px-4 pt-6 pb-40">
+                {showPushBanner && (
+                    <button
+                        data-testid="push-banner"
+                        onClick={enablePush}
+                        className="w-full mb-4 rounded-2xl border border-accent/30 bg-accent/10 hover:bg-accent/15 transition-colors px-4 py-3 text-left flex items-center gap-3"
+                    >
+                        <div className="w-9 h-9 rounded-xl bg-accent/15 grid place-items-center shrink-0">
+                            <Bell className="w-4 h-4 text-accent" />
+                        </div>
+                        <div className="text-sm leading-snug">
+                            <div className="font-medium">Get notified when reminders are due</div>
+                            <div className="text-xs text-muted-foreground">Browser-only · stays on this device</div>
+                        </div>
+                    </button>
+                )}
                 {loading ? (
                     <div className="grid place-items-center py-24">
                         <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
@@ -142,6 +194,7 @@ export default function Journal() {
                                 item={it}
                                 onToggle={toggleItem}
                                 onDelete={deleteItem}
+                                onSnooze={snoozeItem}
                             />
                         ))}
                         <div ref={listEndRef} />

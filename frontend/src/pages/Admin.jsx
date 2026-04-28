@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Search, Shield, Crown, UserCog, Trash2, Loader2, Cloud, Lock } from "lucide-react";
+import { ArrowLeft, Search, Shield, Crown, UserCog, Trash2, Loader2, Cloud, Lock, ScrollText } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,8 @@ export default function Admin() {
     const { user } = useAuth();
     const [users, setUsers] = useState([]);
     const [stats, setStats] = useState(null);
+    const [audit, setAudit] = useState([]);
+    const [showAudit, setShowAudit] = useState(false);
     const [loading, setLoading] = useState(true);
     const [busyId, setBusyId] = useState(null);
     const [q, setQ] = useState("");
@@ -43,9 +45,14 @@ export default function Admin() {
 
     const load = async () => {
         try {
-            const [u, s] = await Promise.all([api.get("/admin/users"), api.get("/admin/stats")]);
+            const [u, s, a] = await Promise.all([
+                api.get("/admin/users"),
+                api.get("/admin/stats"),
+                api.get("/admin/audit-log").catch(() => ({ data: [] })),
+            ]);
             setUsers(u.data || []);
             setStats(s.data || null);
+            setAudit(a.data || []);
         } catch {
             toast.error("Could not load users — check your permissions");
         } finally {
@@ -173,6 +180,56 @@ export default function Admin() {
                     <strong className="text-foreground">Privacy note.</strong>{" "}
                     Most users keep their data on-device by default. The dashboard shows identity, role and storage mode only —
                     not their journal entries or chats.
+                </div>
+
+                <div className="rounded-3xl border border-border bg-card overflow-hidden">
+                    <button
+                        data-testid="admin-audit-toggle"
+                        onClick={() => setShowAudit((v) => !v)}
+                        className="w-full flex items-center gap-3 p-4 text-left hover:bg-muted/40 transition-colors"
+                    >
+                        <div className="w-10 h-10 rounded-2xl bg-muted grid place-items-center shrink-0">
+                            <ScrollText className="w-4 h-4 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <div className="font-display text-base">Audit log</div>
+                            <div className="text-xs text-muted-foreground">
+                                {audit.length} event{audit.length === 1 ? "" : "s"} · role changes & deletions
+                            </div>
+                        </div>
+                        <span className="text-xs text-muted-foreground">{showAudit ? "Hide" : "Show"}</span>
+                    </button>
+                    {showAudit && (
+                        <div className="border-t border-border" data-testid="admin-audit-list">
+                            {audit.length === 0 ? (
+                                <p className="text-center text-muted-foreground text-sm py-6">No admin actions yet.</p>
+                            ) : (
+                                <ul className="divide-y divide-border max-h-96 overflow-auto">
+                                    {audit.map((row) => (
+                                        <li key={row.id} className="px-4 py-3 text-sm" data-testid={`audit-row-${row.id}`}>
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span className="font-medium">{row.actor_email}</span>
+                                                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                                                    {row.action.replace("_", " ")}
+                                                </span>
+                                                {row.meta?.target_email && (
+                                                    <span className="text-muted-foreground">→ {row.meta.target_email}</span>
+                                                )}
+                                                {row.action === "set_role" && row.meta?.from && row.meta?.to && (
+                                                    <span className="text-xs text-muted-foreground">
+                                                        ({row.meta.from} → {row.meta.to})
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="text-[11px] text-muted-foreground mt-0.5">
+                                                {fmt(row.created_at)}
+                                            </div>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                    )}
                 </div>
             </main>
             <Footer />

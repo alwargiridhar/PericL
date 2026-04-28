@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Bell, Lightbulb, Mic, Trash2, ListTodo, FileText } from "lucide-react";
+import { Check, Bell, Lightbulb, Mic, Trash2, ListTodo, FileText, Clock } from "lucide-react";
 import { journal } from "@/lib/storage";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const TYPE_META = {
     voice: { Icon: Mic, label: "Voice", tone: "primary" },
@@ -9,6 +15,18 @@ const TYPE_META = {
     reminder: { Icon: Bell, label: "Reminder", tone: "accent" },
     idea: { Icon: Lightbulb, label: "Idea", tone: "muted" },
 };
+
+const SNOOZE_OPTIONS = [
+    { label: "10 minutes", ms: 10 * 60 * 1000 },
+    { label: "1 hour", ms: 60 * 60 * 1000 },
+    { label: "Tomorrow morning", at: () => {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        d.setHours(9, 0, 0, 0);
+        return d;
+    } },
+    { label: "Next week", ms: 7 * 24 * 60 * 60 * 1000 },
+];
 
 function fmtRelative(iso) {
     if (!iso) return "";
@@ -31,7 +49,7 @@ function fmtDue(iso) {
     });
 }
 
-export default function TimelineItem({ item, onToggle, onDelete }) {
+export default function TimelineItem({ item, onToggle, onDelete, onSnooze }) {
     const meta = TYPE_META[item.type] || TYPE_META.text;
     const isMine = item.type === "voice" || item.type === "text";
     const isExtracted = item.type === "task" || item.type === "reminder" || item.type === "idea";
@@ -123,6 +141,34 @@ export default function TimelineItem({ item, onToggle, onDelete }) {
                                         <Check className="w-3 h-3" />
                                         {item.completed ? "Mark open" : "Done"}
                                     </button>
+                                )}
+                                {item.type === "reminder" && !item.completed && onSnooze && (
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <button
+                                                data-testid={`item-snooze-${item.id}`}
+                                                className="text-xs font-medium px-2.5 py-1 rounded-full bg-muted hover:bg-accent hover:text-accent-foreground transition-colors flex items-center gap-1"
+                                                aria-label="Snooze"
+                                            >
+                                                <Clock className="w-3 h-3" />
+                                                Snooze
+                                            </button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="start">
+                                            {SNOOZE_OPTIONS.map((opt) => (
+                                                <DropdownMenuItem
+                                                    key={opt.label}
+                                                    data-testid={`snooze-option-${opt.label.replace(/\s+/g, "-").toLowerCase()}`}
+                                                    onClick={() => {
+                                                        const at = opt.at ? opt.at() : new Date(Date.now() + opt.ms);
+                                                        onSnooze(item, at);
+                                                    }}
+                                                >
+                                                    {opt.label}
+                                                </DropdownMenuItem>
+                                            ))}
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
                                 )}
                                 <button
                                     data-testid={`item-delete-${item.id}`}

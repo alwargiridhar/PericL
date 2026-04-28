@@ -66,7 +66,16 @@ export function StorageProvider({ children }) {
                 dismissPrompt,
             }}
         >
-            {children}
+            {/* Block children until we know the mode — prevents pages from
+                hitting localStorage when the user is in cloud, or vice versa,
+                during the brief refresh window on first load. */}
+            {loading && user ? (
+                <div className="min-h-screen grid place-items-center bg-background">
+                    <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                </div>
+            ) : (
+                children
+            )}
         </StorageContext.Provider>
     );
 }

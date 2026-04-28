@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Lock, Cloud, BellOff, Loader2 } from "lucide-react";
+import { ArrowLeft, Lock, Cloud, BellOff, Loader2, Download } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useStorage } from "@/contexts/StorageContext";
-import { migrateLocalToCloud } from "@/lib/storage";
+import { migrateLocalToCloud, migrateCloudToLocal } from "@/lib/storage";
 import Footer from "@/components/Footer";
 
 const OPTIONS = [
@@ -40,12 +40,28 @@ export default function Privacy() {
     const apply = async (v) => {
         setBusy(true);
         try {
+            // When switching cloud → local, pull the cloud data down first so we don't lose it.
+            if (v !== "cloud" && current === "cloud") {
+                try { await migrateCloudToLocal(); } catch {}
+            }
             if (v === "cloud") await migrateLocalToCloud();
             await setMode(v);
             setCurrent(v);
-            toast.success(v === "cloud" ? "Cloud sync turned on" : v === "local" ? "Now keeping data on device only" : "We won't ask again");
+            toast.success(v === "cloud" ? "Cloud sync turned on — local data uploaded" : v === "local" ? "Now keeping data on device only" : "We won't ask again");
         } catch {
             toast.error("Could not update preference");
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const downloadCloud = async () => {
+        setBusy(true);
+        try {
+            await migrateCloudToLocal();
+            toast.success("Cloud data copied to this device");
+        } catch {
+            toast.error("Could not download — try again");
         } finally {
             setBusy(false);
         }
@@ -128,6 +144,31 @@ export default function Privacy() {
                     When you keep your data on device, the monthly check-in respects you — if you say &quot;never,&quot; PericL stops asking.
                     Calls to your inner voice are stateless: nothing about your text or audio is stored on the server.
                 </div>
+
+                {current === "cloud" && (
+                    <div className="rounded-3xl border border-border bg-card p-5">
+                        <div className="flex items-start gap-4">
+                            <div className="w-11 h-11 rounded-2xl bg-muted grid place-items-center shrink-0">
+                                <Download className="w-5 h-5 text-primary" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                                <h3 className="font-display text-base">Pull cloud copy onto this device</h3>
+                                <p className="text-sm text-muted-foreground leading-relaxed mt-1">
+                                    Useful before switching back to on-device, or to seed a new browser.
+                                </p>
+                                <Button
+                                    data-testid="privacy-download-cloud"
+                                    onClick={downloadCloud}
+                                    disabled={busy}
+                                    variant="outline"
+                                    className="mt-3 rounded-full"
+                                >
+                                    {busy ? "Working…" : "Download my cloud data"}
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </main>
             <Footer />
         </div>

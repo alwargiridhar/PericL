@@ -1,0 +1,11 @@
+import axios from "axios";
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+export const API_BASE = `${BACKEND_URL}/api`;
+
+export const api = axios.create({
+    baseURL: API_BASE,
+    withCredentials: true,
+});
+
+export const audioUrl = (audioId) => `${API_BASE}/audio/${audioId}`;

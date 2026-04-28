@@ -1,0 +1,91 @@
+import { Sun, Moon, BarChart3, LogOut, User } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useTheme } from "@/contexts/ThemeContext";
+import { useAuth } from "@/contexts/AuthContext";
+
+export default function Header({ onOpenRecaps }) {
+    const { theme, toggle } = useTheme();
+    const { user, logout } = useAuth();
+
+    return (
+        <header
+            className="sticky top-0 z-30 backdrop-blur-xl bg-background/80 border-b border-border/60"
+            data-testid="app-header"
+        >
+            <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
+                <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-2xl bg-primary text-primary-foreground grid place-items-center font-display font-medium">
+                        P
+                    </div>
+                    <div className="leading-tight">
+                        <div className="font-display text-base font-medium">PericL</div>
+                        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                            voice journal
+                        </div>
+                    </div>
+                </div>
+
+                <div className="ml-auto flex items-center gap-1">
+                    <Button
+                        data-testid="header-recap-btn"
+                        variant="ghost"
+                        size="icon"
+                        onClick={onOpenRecaps}
+                        className="rounded-full h-9 w-9"
+                        aria-label="Daily recap"
+                    >
+                        <BarChart3 className="w-4 h-4" />
+                    </Button>
+                    <Button
+                        data-testid="header-theme-toggle"
+                        variant="ghost"
+                        size="icon"
+                        onClick={toggle}
+                        className="rounded-full h-9 w-9"
+                        aria-label="Toggle theme"
+                    >
+                        {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                    </Button>
+
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <button
+                                data-testid="header-user-menu-trigger"
+                                className="ml-1 w-9 h-9 rounded-full overflow-hidden ring-1 ring-border bg-muted grid place-items-center"
+                            >
+                                {user?.picture ? (
+                                    <img src={user.picture} alt={user.name} className="w-full h-full object-cover" />
+                                ) : (
+                                    <User className="w-4 h-4" />
+                                )}
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                            <DropdownMenuLabel className="leading-tight">
+                                <div className="font-medium truncate">{user?.name}</div>
+                                <div className="text-xs text-muted-foreground truncate">{user?.email}</div>
+                            </DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                                data-testid="header-logout"
+                                onClick={logout}
+                                className="text-destructive focus:text-destructive"
+                            >
+                                <LogOut className="w-4 h-4 mr-2" />
+                                Sign out
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </div>
+            </div>
+        </header>
+    );
+}

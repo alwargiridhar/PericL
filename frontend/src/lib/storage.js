@@ -304,6 +304,66 @@ export const journal = {
     },
 };
 
+// ---------- Behavior signals (local mode) — fed into the Mirror chat prompt ----------
+function _computeBehaviorSignalsLocal() {
+    const items = lsGet(LS.JOURNAL, []) || [];
+    const now = Date.now();
+    const sevenAgo = now - 7 * 24 * 3600 * 1000;
+    let voiceText7 = 0;
+    let completed7 = 0;
+    let openTasks = 0;
+    let overdue = 0;
+    const overdueTitles = [];
+    const moods = [];
+    let lastEntryAt = 0;
+    for (const it of items) {
+        const ca = new Date(it.created_at || 0).getTime() || 0;
+        if (it.type === "voice" || it.type === "text") {
+            if (ca >= sevenAgo) voiceText7 += 1;
+            if (ca > lastEntryAt) lastEntryAt = ca;
+            if (it.mood) moods.push(it.mood);
+        }
+        if (it.type === "task") {
+            if (it.completed) {
+                if (ca >= sevenAgo) completed7 += 1;
+            } else {
+                openTasks += 1;
+            }
+        }
+        if (it.type === "reminder" && !it.completed && it.due_at) {
+            const due = new Date(it.due_at).getTime();
+            if (due && due < now) {
+                overdue += 1;
+                if (overdueTitles.length < 5) overdueTitles.push(it.title);
+            }
+        }
+    }
+    const moodCounts = {};
+    moods.forEach((m) => { moodCounts[m] = (moodCounts[m] || 0) + 1; });
+    const topMoods = Object.entries(moodCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map((e) => e[0]);
+    return {
+        voice_text_entries_7d: voiceText7,
+        tasks_completed_7d: completed7,
+        open_tasks: openTasks,
+        missed_or_overdue_reminders: overdue,
+        overdue_titles: overdueTitles,
+        days_since_last_entry: lastEntryAt ? Math.floor((now - lastEntryAt) / (24 * 3600 * 1000)) : null,
+        top_moods_7d: topMoods,
+    };
+}
+
+// Lightweight client-side mood heuristic (mirrors AiChat.jsx logic for chat-stateless)
+function _inferMoodLocal(text) {
+    const t = (text || "").toLowerCase();
+    if (/[!]{2,}|🎉|amazing|incredible|stoked|let'?s go|finally|shipped|launch/i.test(t)) return "excited";
+    if (/happy|grateful|joy|love|blessed|smile|good day|win|proud/i.test(t)) return "happy";
+    if (/stress|overwhelm|anxious|panic|deadline|too much|burn(ed|t)? out/i.test(t)) return "stressed";
+    if (/sad|down|cry|lonely|miss|hurt|alone|tired/i.test(t)) return "sad";
+    if (/calm|peaceful|breathe|quiet|still|relax/i.test(t)) return "calm";
+    if (/focus|plan|ship|build|goal|priorit|launch|strateg/i.test(t)) return "focused";
+    return null;
+}
+
 // ---------- AI Chat ----------
 export const chat = {
     async list() {
@@ -335,6 +395,8 @@ export const chat = {
             profile: prof,
             personality: personalityDoc,
             recent_moods,
+            behavior: _computeBehaviorSignalsLocal(),
+            current_mood: _inferMoodLocal(message),
         });
         const asstMsg = {
             id: uid("m"),

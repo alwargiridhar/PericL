@@ -688,35 +688,182 @@ async def get_assessment(assessment_id: str, user: User = Depends(get_current_us
     return doc
 
 
-# ---------------------------- AI Chat (Personal Assistant + Friend) ----------------------------
-def _build_chat_system_message(profile: dict | None, personality: dict | None, recent_moods: list[str]) -> str:
+# ---------------------------- AI Chat (the Mirror) ----------------------------
+def _parse_top_goals(goals_text: str | None) -> list[str]:
+    """Best-effort extract up to 3 distinct top goals from the user's free-text goals field."""
+    if not goals_text:
+        return []
+    # Split by newlines, then by bullets / numbered prefixes / sentence breaks
+    lines = [ln.strip() for ln in re.split(r"[\n;]+", goals_text) if ln.strip()]
+    if len(lines) < 2:
+        # try splitting by sentence
+        lines = [s.strip() for s in re.split(r"(?<=[.!?])\s+", goals_text) if s.strip()]
+    cleaned: list[str] = []
+    for ln in lines:
+        ln = re.sub(r"^[\-•\*\d\.\)\s]+", "", ln).strip()
+        if ln:
+            cleaned.append(ln[:160])
+        if len(cleaned) >= 3:
+            break
+    return cleaned
+
+
+def _compute_behavior_signals_from_items(items: list[dict]) -> dict:
+    """Compute drift/effort signals from journal items (any mode)."""
+    now = datetime.now(timezone.utc)
+    seven_days_ago = now - timedelta(days=7)
+    voice_text_7d = 0
+    completed_7d = 0
+    missed_overdue = 0
+    open_tasks = 0
+    open_reminders_overdue: list[dict] = []
+    moods: list[str] = []
+    last_entry_at: datetime | None = None
+
+    for it in items or []:
+        ca = parse_dt(it.get("created_at"))
+        if not ca:
+            continue
+        t = it.get("type")
+        if t in ("voice", "text"):
+            if ca >= seven_days_ago:
+                voice_text_7d += 1
+            if not last_entry_at or ca > last_entry_at:
+                last_entry_at = ca
+            m = it.get("mood")
+            if m:
+                moods.append(m)
+        if t == "task":
+            if it.get("completed"):
+                if ca >= seven_days_ago:
+                    completed_7d += 1
+            else:
+                open_tasks += 1
+        if t == "reminder" and not it.get("completed"):
+            due = parse_dt(it.get("due_at"))
+            if due and due < now:
+                missed_overdue += 1
+                open_reminders_overdue.append({
+                    "title": it.get("title"),
+                    "due_at": it.get("due_at"),
+                })
+
+    days_since_last = None
+    if last_entry_at:
+        days_since_last = (now - last_entry_at).days
+
+    # Top moods (most common)
+    mood_counts: dict[str, int] = {}
+    for m in moods:
+        mood_counts[m] = mood_counts.get(m, 0) + 1
+    sorted_moods = sorted(mood_counts.items(), key=lambda x: -x[1])
+    top_moods = [m for m, _ in sorted_moods[:3]]
+
+    return {
+        "voice_text_entries_7d": voice_text_7d,
+        "tasks_completed_7d": completed_7d,
+        "open_tasks": open_tasks,
+        "missed_or_overdue_reminders": missed_overdue,
+        "overdue_titles": [o["title"] for o in open_reminders_overdue[:5]],
+        "days_since_last_entry": days_since_last,
+        "top_moods_7d": top_moods,
+    }
+
+
+def _build_chat_system_message(
+    profile: dict | None,
+    personality: dict | None,
+    recent_moods: list[str],
+    behavior: dict | None = None,
+    current_mood: str | None = None,
+) -> str:
+    top_goals = _parse_top_goals((profile or {}).get("goals"))
+    identity = (profile or {}).get("aspirations") or ""
+    name = (profile or {}).get("name") or ""
+
+    # Core identity prompt — verbatim mirror spec from the user.
     parts = [
-        "You are not an assistant. You are the user's own inner voice — a calm, slightly-ahead version of themselves they're talking with.",
-        "Speak AS them, TO them. Mirror their tone, energy, vocabulary, and emotional stability. Never say 'I' as if you were external — speak in second-person reflective voice ('You felt...', 'You could...').",
-        "NEVER say 'I am an AI', 'as an AI', 'as an assistant'. You are simply the user, written down.",
-        "Your role: push them toward THEIR stated goals (especially profile/aspirations); call out their patterns; help find monetization paths or career strategy where relevant; protect their values.",
-        "Be direct, honest, and kind — like the inner voice that already knows them. No preachy advice. Short paragraphs. One focused follow-up question when useful.",
+        "You are PericL — a personal mirror, not an assistant.",
+        "Your role is to help the user convert thoughts into clear action, track their real progress toward their goals, "
+        "and gently but honestly confront gaps between intention and behavior.",
+        "You must always feel like: the user's own voice, slightly calmer, slightly more honest, slightly more disciplined. "
+        "Never sound like a generic AI. Never say 'as an AI' or 'as an assistant'.",
+        "",
+        "## YOUR JOB (always 4 steps)",
+        "1) CLARIFY — sharpen what the user actually means, not just what they say.",
+        "2) MIRROR — match their tone, sentence length, and style; remove confusion, reduce excuses, increase clarity.",
+        "3) REALITY CHECK — compare goals vs actual behavior. If mismatch, point it out calmly: 'You said this matters, but you haven't worked on it in days.' Never harsh. Never fake-positive.",
+        "4) DIRECT — end with EXACTLY ONE next move, < 15 minutes, specific, aligned to a top goal.",
+        "",
+        "## DRIFT DETECTION",
+        "If repeated avoidance, low-effort, inconsistency: say 'You're drifting from what you said matters.' Then guide back with a small action.",
+        "",
+        "## TIME REALITY ENGINE",
+        "If the current effort rate cannot reach a goal in 90 days, say so plainly. Offer: increase effort OR reduce scope.",
+        "",
+        "## MOOD-AWARE TONE",
+        "If LOW mood (sad/stressed): softer tone, smaller next step.",
+        "If HIGH energy (excited/happy/focused): push slightly harder, slightly more challenging action.",
+        "",
+        "## NEVER",
+        "- No long lectures, no multiple action steps, no coach/therapist voice, no over-motivation, no ignoring inconsistencies, no markdown headings, no bullet lists in the body.",
+        "",
+        "## RESPONSE STRUCTURE (mandatory, in this exact order)",
+        "1. A short reflection (1-2 sentences mirroring their thought).",
+        "2. A reality insight (only if needed — 1 sentence calling out drift, mismatch, or pace).",
+        "3. A direction sentence (where they should go next).",
+        "4. A blank line, then exactly: '🎯 Next Move: <one specific action under 15 minutes>'.",
+        "Keep total length tight — under ~100 words.",
     ]
+
+    # Structured context inputs
+    ctx = ["", "## CONTEXT INPUTS"]
+    if name:
+        ctx.append(f"- name: {name}")
+    if identity:
+        ctx.append(f"- identity (who they want to become): {identity}")
+    if top_goals:
+        ctx.append("- top goals (use these to anchor the next move):")
+        for i, g in enumerate(top_goals, 1):
+            ctx.append(f"    {i}. {g}")
+    # other helpful profile bits
     if profile:
-        bits = []
-        for f in ("name", "age", "occupation", "goals", "challenges", "core_values", "aspirations",
-                  "personality_traits", "communication_style", "energy_level", "motivation_triggers"):
+        for f in ("occupation", "challenges", "core_values",
+                  "communication_style", "energy_level", "motivation_triggers", "personality_traits"):
             v = profile.get(f)
             if v:
-                bits.append(f"{f}: {v}")
-        if bits:
-            parts.append("\nYour own profile (these are YOUR facts):\n- " + "\n- ".join(bits))
+                ctx.append(f"- {f}: {v}")
     if personality:
         pt = personality.get("personality_type")
         if pt:
-            parts.append(
-                f"\nYour MBTI: {pt} ({personality.get('type_name','')}). "
-                f"Your strengths: {', '.join(personality.get('strengths') or [])[:300]}. "
-                f"Your growth areas: {', '.join(personality.get('growth_areas') or [])[:300]}."
+            ctx.append(
+                f"- MBTI: {pt} ({personality.get('type_name','')}); "
+                f"strengths: {', '.join(personality.get('strengths') or [])[:240]}; "
+                f"growth areas: {', '.join(personality.get('growth_areas') or [])[:240]}."
             )
+
+    # Behavior signals (last 7 days)
+    if behavior:
+        b = behavior
+        ctx.append("- behavior (last 7 days):")
+        ctx.append(f"    journal entries: {b.get('voice_text_entries_7d', 0)}")
+        ctx.append(f"    tasks completed: {b.get('tasks_completed_7d', 0)}")
+        ctx.append(f"    tasks still open: {b.get('open_tasks', 0)}")
+        ctx.append(f"    overdue reminders: {b.get('missed_or_overdue_reminders', 0)}")
+        if b.get("overdue_titles"):
+            ctx.append(f"    overdue titles: {', '.join(b['overdue_titles'])}")
+        dsle = b.get("days_since_last_entry")
+        if dsle is not None:
+            ctx.append(f"    days since last entry: {dsle}")
+        if b.get("top_moods_7d"):
+            ctx.append(f"    top moods (7d): {', '.join(b['top_moods_7d'])}")
+
     if recent_moods:
-        parts.append("\nYour recent moods (most recent first): " + ", ".join(recent_moods[:5]))
-    return "\n".join(parts)
+        ctx.append(f"- recent moods (most recent first): {', '.join(recent_moods[:5])}")
+    if current_mood:
+        ctx.append(f"- current input mood: {current_mood}")
+
+    return "\n".join(parts) + "\n" + "\n".join(ctx)
 
 
 @api.get("/ai/messages")
@@ -752,7 +899,25 @@ async def chat_send(payload: dict, user: User = Depends(get_current_user)):
     ).sort("created_at", -1).limit(8).to_list(length=8)
     moods = [j.get("mood") for j in recent_journal if j.get("mood")]
 
-    sys_msg = _build_chat_system_message(profile, personality_doc, moods)
+    # Behavior signals from last 14 days of items (covers "missed in last 7d" + slightly older context)
+    fourteen_days_ago = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+    items_for_signals = await db.journal_items.find(
+        {"user_id": user.user_id, "created_at": {"$gte": fourteen_days_ago}},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(length=400)
+    behavior = _compute_behavior_signals_from_items(items_for_signals)
+
+    # Detect current mood from this message (best-effort, JSON output already)
+    current_mood = None
+    try:
+        ai_quick = await categorize(message)
+        current_mood = (ai_quick or {}).get("mood")
+    except Exception:
+        pass
+
+    sys_msg = _build_chat_system_message(
+        profile, personality_doc, moods, behavior=behavior, current_mood=current_mood
+    )
 
     # History — keep last 16 turns for context
     history_cursor = db.ai_messages.find({"user_id": user.user_id}, {"_id": 0}).sort("created_at", -1).limit(16)
@@ -772,7 +937,7 @@ async def chat_send(payload: dict, user: User = Depends(get_current_user)):
         reply = (await chat.send_message(UserMessage(text=convo))).strip()
     except Exception as e:
         logger.warning("chat error: %s", e)
-        reply = "Sorry, I had a tiny hiccup just now. Want to try that again?"
+        reply = "Take a breath. Try that again in a moment.\n\n🎯 Next Move: Write one sentence about what's actually on your mind."
 
     asst_msg = {
         "id": f"m_{uuid.uuid4().hex[:12]}",
@@ -971,7 +1136,7 @@ async def stateless_personality_analyze(payload: dict, user: User = Depends(get_
 
 @api.post("/ai/chat-stateless")
 async def stateless_chat(payload: dict, user: User = Depends(get_current_user)):
-    """Caller passes full context: history (last N), profile, personality, recent_moods, message."""
+    """Caller passes full context: history, profile, personality, recent_moods, behavior, current_mood, message."""
     message = (payload.get("message") or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="Empty message")
@@ -979,8 +1144,12 @@ async def stateless_chat(payload: dict, user: User = Depends(get_current_user)):
     profile = payload.get("profile") or None
     personality = payload.get("personality") or None
     moods = payload.get("recent_moods") or []
+    behavior = payload.get("behavior") or None
+    current_mood = payload.get("current_mood") or None
 
-    sys_msg = _build_chat_system_message(profile, personality, moods)
+    sys_msg = _build_chat_system_message(
+        profile, personality, moods, behavior=behavior, current_mood=current_mood
+    )
     convo = ""
     for m in history[-16:]:
         prefix = "User" if m.get("role") == "user" else "PericL"
@@ -996,7 +1165,7 @@ async def stateless_chat(payload: dict, user: User = Depends(get_current_user)):
         reply = (await chat.send_message(UserMessage(text=convo))).strip()
     except Exception as e:
         logger.warning("stateless chat error: %s", e)
-        reply = "Take a breath. Try that again in a moment."
+        reply = "Take a breath. Try that again in a moment.\n\n🎯 Next Move: Write one sentence about what's actually on your mind."
     return {"reply": reply}
 
 

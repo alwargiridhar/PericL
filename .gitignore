@@ -76,26 +76,22 @@ agenthub/agents/youtube/db
 # Build caches
 .cache/
 
-memory/test_credentials.md
+memory/test_credentials_disabled.md
 
 # Mobile development
 android-sdk/frontend/node_modules/.cache/default-development/12.pack
 frontend/node_modules/.cache/default-development/20.pack
 -e 
-# Environment and credential files
-.env
-.env.*
-*.env
+# Credential files (env files are intentionally tracked for Emergent deployment)
 credentials.json
 *.pem
 *.key
 .credentials
 -e 
-# Environment and credential files
-.env
-.env.*
-*.env
+# Credential files
 credentials.json
 *.pem
 *.key
 .credentials
+frontend/node_modules/.cache/default-development/11.pack
+frontend/node_modules/.cache/default-development/11.pack

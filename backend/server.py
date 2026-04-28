@@ -1356,7 +1356,7 @@ async def admin_list_users(admin: User = Depends(get_admin_user)):
     users = await cursor.to_list(length=500)
     # Attach storage mode for transparency
     pref_map = {}
-    pref_cursor = db.storage_prefs.find({}, {"_id": 0, "user_id": 1, "mode": 1})
+    pref_cursor = db.storage_prefs.find({}, {"_id": 0, "user_id": 1, "mode": 1}).limit(500)
     async for p in pref_cursor:
         pref_map[p.get("user_id")] = p.get("mode", "local")
     out = []

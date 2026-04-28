@@ -1,0 +1,103 @@
+{
+  "project": "PericL",
+  "theme": "light_and_dark",
+  "archetype": "Organic & Earthy",
+  "vibe": "Introspective, calm-but-alive, evocative, premium personal space",
+  "typography": {
+    "font_families": {
+      "headings": "Cabinet Grotesk",
+      "body": "Satoshi"
+    },
+    "scale_rules": {
+      "h1": "text-4xl sm:text-5xl tracking-tight font-medium",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-medium",
+      "h3": "text-xl font-medium",
+      "body": "text-base leading-relaxed font-normal",
+      "caption": "text-sm tracking-wide uppercase font-medium"
+    },
+    "notes": "Do not use default bold. Use font-medium for emphasis. Enforce strict hierarchy. Avoid Inter or Roboto entirely."
+  },
+  "colors": {
+    "light": {
+      "background": "#F7F5F2",
+      "surface": "#FFFFFF",
+      "primary": "#556B52",
+      "primary_foreground": "#FFFFFF",
+      "secondary": "#EFECE5",
+      "secondary_foreground": "#2D372B",
+      "accent": "#8B5E3C",
+      "accent_foreground": "#FFFFFF",
+      "muted": "#E8E4DB",
+      "muted_foreground": "#5C665A",
+      "border": "#E8E4DB",
+      "text_primary": "#2D372B",
+      "text_secondary": "#5C665A"
+    },
+    "dark": {
+      "background": "#121412",
+      "surface": "#1A1D1A",
+      "primary": "#94B08F",
+      "primary_foreground": "#121412",
+      "secondary": "#242823",
+      "secondary_foreground": "#E8EAE6",
+      "accent": "#D4A373",
+      "accent_foreground": "#121412",
+      "muted": "#292E28",
+      "muted_foreground": "#A0A69D",
+      "border": "#292E28",
+      "text_primary": "#E8EAE6",
+      "text_secondary": "#A0A69D"
+    }
+  },
+  "layout_and_spacing": {
+    "spacing_scale": "Use generous padding: p-4 for chat bubbles, p-6 for cards, p-8 for sections.",
+    "container": "max-w-2xl mx-auto (Mobile-first chat layout)",
+    "timeline_chat_pattern": {
+      "user_entries": "Right-aligned, max-w-[85%], slightly rounded corners, asymmetric border-radius (e.g., rounded-2xl rounded-br-sm)",
+      "ai_entries": "Left-aligned, max-w-[85%], muted background, rounded-2xl rounded-bl-sm",
+      "recap_cards": "Full width, bento-grid style structure inside, rich background texture."
+    },
+    "voice_dock": "Floating bottom bar, absolute/fixed positioned, z-50, crystal glassmorphism overlay."
+  },
+  "surface_strategies": {
+    "voice_dock": "Crystal Glassmorphism: backdrop-blur-xl bg-white/70 (light) or bg-black/60 (dark), 1px delicate inner border.",
+    "daily_recap": "Neumorphic/Clay blend or flat solid with organic background image, subtle 1px border border-black/5.",
+    "badges": "Flat, pill-shaped, muted colors for tags like 'Tasks', 'Reminders'."
+  },
+  "motion_and_interactions": {
+    "hover_states": "Slight lift (-translate-y-0.5) and subtle shadow increase for cards. Hover colors must be explicit.",
+    "waveform": "Live animation during recording, mapped to primary color.",
+    "chat_entry": "Slide up and fade in entrance animation (staggered for lists).",
+    "haptics": "Suggest compound gestures (swipe left to archive/dismiss) with simulated haptic feedback."
+  },
+  "components_instructions": {
+    "buttons": "Rounded-full for main actions, highly tactile.",
+    "inputs": "Shadcn based but highly customized. No heavy borders, rely on background contrast.",
+    "cards": "Avoid generic Shadcn cards. Build custom bento-like containers with generous internal padding (p-6) to avoid text collision.",
+    "testing": "All interactive and key informational elements MUST include data-testid attribute in kebab-case."
+  },
+  "media": {
+    "images": [
+      {
+        "category": "empty_state",
+        "url": "https://static.prod-images.emergentagent.com/jobs/91eb5a19-f7fc-480a-9ee8-2cb548966239/images/a925322b43e910670225856670579aa821f5781f38637d4cf79560891b45e7ba.png",
+        "description": "Minimalist organic 3D shapes floating softly in a warm beige space, encouraging mood."
+      },
+      {
+        "category": "daily_recap_bg_light",
+        "url": "https://static.prod-images.emergentagent.com/jobs/91eb5a19-f7fc-480a-9ee8-2cb548966239/images/8220e1f3a964dddb6da19f29099cd749fe5c9e824848c697e3191c266d353bd2.png",
+        "description": "Soft gradient blur, morning sunlight, pale sage and warm sand colors."
+      },
+      {
+        "category": "daily_recap_bg_dark",
+        "url": "https://images.pexels.com/photos/5978451/pexels-photo-5978451.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Detailed macro photograph showcasing intricate textures of a dried leaf, use with a dark overlay (bg-black/60) for dark mode recap cards."
+      },
+      {
+        "category": "texture_accent",
+        "url": "https://images.pexels.com/photos/6142118/pexels-photo-6142118.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Closeup of thin fragile colorful tendrils, useful for ambient background layers."
+      }
+    ]
+  }
+}

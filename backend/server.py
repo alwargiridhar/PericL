@@ -514,6 +514,363 @@ async def list_recaps(user: User = Depends(get_current_user)):
     return await cursor.to_list(length=30)
 
 
+# ---------------------------- Profile (Personality Builder) ----------------------------
+PROFILE_FIELDS = [
+    "name", "age", "occupation", "goals", "challenges",
+    "personality_traits", "communication_style", "energy_level",
+    "motivation_triggers", "core_values", "aspirations",
+]
+
+
+@api.get("/profile")
+async def get_profile(user: User = Depends(get_current_user)):
+    doc = await db.user_profiles.find_one({"user_id": user.user_id}, {"_id": 0})
+    if not doc:
+        return {"user_id": user.user_id, **{f: None for f in PROFILE_FIELDS}, "onboarding_completed": False}
+    doc.pop("created_at", None)
+    return doc
+
+
+@api.put("/profile")
+async def update_profile(payload: dict, user: User = Depends(get_current_user)):
+    update = {k: v for k, v in payload.items() if k in PROFILE_FIELDS}
+    completed = any(update.get(f) for f in ("name", "goals", "core_values", "aspirations"))
+    update["onboarding_completed"] = completed
+    update["user_id"] = user.user_id
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.user_profiles.update_one(
+        {"user_id": user.user_id},
+        {"$set": update, "$setOnInsert": {"created_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    doc = await db.user_profiles.find_one({"user_id": user.user_id}, {"_id": 0})
+    return doc
+
+
+# ---------------------------- Personality (MBTI) ----------------------------
+MBTI_NAMES = {
+    "ISTJ": "The Inspector", "ISFJ": "The Protector", "INFJ": "The Counselor",
+    "INTJ": "The Mastermind", "ISTP": "The Craftsperson", "ISFP": "The Composer",
+    "INFP": "The Healer", "INTP": "The Architect", "ESTP": "The Dynamo",
+    "ESFP": "The Performer", "ENFP": "The Champion", "ENTP": "The Visionary",
+    "ESTJ": "The Supervisor", "ESFJ": "The Provider", "ENFJ": "The Teacher",
+    "ENTJ": "The Commander",
+}
+
+
+def compute_mbti(scores: dict) -> str:
+    s = {k: int(scores.get(k, 0)) for k in "EISNTFJP"}
+    return (
+        ("E" if s["E"] >= s["I"] else "I")
+        + ("S" if s["S"] >= s["N"] else "N")
+        + ("T" if s["T"] >= s["F"] else "F")
+        + ("J" if s["J"] >= s["P"] else "P")
+    )
+
+
+async def ai_personality_analysis(mbti_type: str, profile: dict | None) -> dict:
+    """Use GPT-5.2 to generate a personalized description + strengths + growth areas as JSON."""
+    name = (profile or {}).get("name") or "this person"
+    goals = (profile or {}).get("goals") or "(not provided)"
+    challenges = (profile or {}).get("challenges") or "(not provided)"
+    sys = (
+        "You are a warm, evidence-based MBTI coach. Given a personality type and (optional) profile, "
+        "return ONLY JSON: {\"description\": str (2-3 sentences, second-person warm voice), "
+        "\"strengths\": [str, str, str, str] (concise), "
+        "\"growth_areas\": [str, str, str, str] (concise, framed positively) }"
+    )
+    chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"mbti-{uuid.uuid4().hex[:8]}", system_message=sys).with_model("openai", "gpt-5.2")
+    msg = UserMessage(text=f"MBTI: {mbti_type} ({MBTI_NAMES.get(mbti_type, '')})\nName: {name}\nGoals: {goals}\nChallenges: {challenges}")
+    try:
+        raw = (await chat.send_message(msg)).strip()
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if m:
+            return json.loads(m.group(0))
+    except Exception as e:
+        logger.warning("mbti analysis fallback: %s", e)
+    return {
+        "description": f"You are {mbti_type} — {MBTI_NAMES.get(mbti_type, 'a unique mix of traits')}.",
+        "strengths": [],
+        "growth_areas": [],
+    }
+
+
+@api.post("/personality/assess")
+async def submit_assessment(payload: dict, user: User = Depends(get_current_user)):
+    scores = payload.get("scores") or {}
+    mbti = compute_mbti(scores)
+    profile = await db.user_profiles.find_one({"user_id": user.user_id}, {"_id": 0})
+    analysis = await ai_personality_analysis(mbti, profile)
+    rec = {
+        "id": f"pa_{uuid.uuid4().hex[:12]}",
+        "user_id": user.user_id,
+        "personality_type": mbti,
+        "type_name": MBTI_NAMES.get(mbti, ""),
+        "description": analysis.get("description", ""),
+        "strengths": analysis.get("strengths", []),
+        "growth_areas": analysis.get("growth_areas", []),
+        "scores": {k: int(scores.get(k, 0)) for k in "EISNTFJP"},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.personality_assessments.insert_one(dict(rec))
+    return rec
+
+
+@api.get("/personality/latest")
+async def latest_assessment(user: User = Depends(get_current_user)):
+    doc = await db.personality_assessments.find_one(
+        {"user_id": user.user_id}, {"_id": 0}, sort=[("created_at", -1)]
+    )
+    if not doc:
+        return {"hasAssessment": False}
+    return {"hasAssessment": True, "assessment": doc}
+
+
+@api.get("/personality/result/{assessment_id}")
+async def get_assessment(assessment_id: str, user: User = Depends(get_current_user)):
+    doc = await db.personality_assessments.find_one(
+        {"id": assessment_id, "user_id": user.user_id}, {"_id": 0}
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    return doc
+
+
+# ---------------------------- AI Chat (Personal Assistant + Friend) ----------------------------
+def _build_chat_system_message(profile: dict | None, personality: dict | None, recent_moods: list[str]) -> str:
+    parts = [
+        "You are PericL — a warm, perceptive personal assistant + thoughtful friend, all in one.",
+        "Be direct yet kind, curious, never preachy. Match the user's energy and reading level.",
+        "Use short paragraphs, no markdown headings. Avoid emojis unless the user uses them first.",
+        "When useful, ask one focused follow-up question. Help users reflect, plan, or just feel heard.",
+    ]
+    if profile:
+        bits = []
+        for f in ("name", "age", "occupation", "goals", "challenges", "core_values", "aspirations"):
+            v = profile.get(f)
+            if v:
+                bits.append(f"{f}: {v}")
+        if bits:
+            parts.append("\nUser profile snapshot:\n- " + "\n- ".join(bits))
+    if personality:
+        pt = personality.get("personality_type")
+        if pt:
+            parts.append(
+                f"\nMBTI type: {pt} ({personality.get('type_name','')}). "
+                f"Mirror their communication style. Strengths: {', '.join(personality.get('strengths') or [])[:300]}. "
+                f"Growth areas (be gentle): {', '.join(personality.get('growth_areas') or [])[:300]}."
+            )
+    if recent_moods:
+        parts.append("\nRecent moods (most recent first): " + ", ".join(recent_moods[:5]))
+    return "\n".join(parts)
+
+
+@api.get("/ai/messages")
+async def get_chat_messages(user: User = Depends(get_current_user)):
+    cursor = db.ai_messages.find({"user_id": user.user_id}, {"_id": 0}).sort("created_at", 1).limit(500)
+    return await cursor.to_list(length=500)
+
+
+@api.post("/ai/chat")
+async def chat_send(payload: dict, user: User = Depends(get_current_user)):
+    message = (payload.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Empty message")
+
+    # Persist user message
+    user_msg = {
+        "id": f"m_{uuid.uuid4().hex[:12]}",
+        "user_id": user.user_id,
+        "role": "user",
+        "content": message,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.ai_messages.insert_one(dict(user_msg))
+
+    # Build context
+    profile = await db.user_profiles.find_one({"user_id": user.user_id}, {"_id": 0})
+    personality_doc = await db.personality_assessments.find_one(
+        {"user_id": user.user_id}, {"_id": 0}, sort=[("created_at", -1)]
+    )
+    recent_journal = await db.journal_items.find(
+        {"user_id": user.user_id, "type": {"$in": ["voice", "text"]}},
+        {"_id": 0, "mood": 1},
+    ).sort("created_at", -1).limit(8).to_list(length=8)
+    moods = [j.get("mood") for j in recent_journal if j.get("mood")]
+
+    sys_msg = _build_chat_system_message(profile, personality_doc, moods)
+
+    # History — keep last 16 turns for context
+    history_cursor = db.ai_messages.find({"user_id": user.user_id}, {"_id": 0}).sort("created_at", -1).limit(16)
+    hist = list(reversed(await history_cursor.to_list(length=16)))
+    convo = ""
+    for m in hist[:-1]:  # exclude the user msg we just inserted (it's last)
+        prefix = "User" if m["role"] == "user" else "PericL"
+        convo += f"{prefix}: {m['content']}\n"
+    convo += f"User: {message}"
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"chat-{user.user_id}",
+        system_message=sys_msg,
+    ).with_model("openai", "gpt-5.2")
+    try:
+        reply = (await chat.send_message(UserMessage(text=convo))).strip()
+    except Exception as e:
+        logger.warning("chat error: %s", e)
+        reply = "Sorry, I had a tiny hiccup just now. Want to try that again?"
+
+    asst_msg = {
+        "id": f"m_{uuid.uuid4().hex[:12]}",
+        "user_id": user.user_id,
+        "role": "assistant",
+        "content": reply,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.ai_messages.insert_one(dict(asst_msg))
+    return {"user_message": user_msg, "assistant_message": asst_msg}
+
+
+@api.delete("/ai/messages")
+async def clear_chat(user: User = Depends(get_current_user)):
+    await db.ai_messages.delete_many({"user_id": user.user_id})
+    return {"ok": True}
+
+
+@api.delete("/ai/messages/{msg_id}")
+async def delete_chat_msg(msg_id: str, user: User = Depends(get_current_user)):
+    await db.ai_messages.delete_one({"id": msg_id, "user_id": user.user_id})
+    return {"ok": True}
+
+
+# ---------------------------- Daily Reflection (Personality Developer) ----------------------------
+DAILY_PROMPTS = {
+    "reflection": [
+        "What's one thing you learned about yourself today?",
+        "What moment today made you feel most alive?",
+        "What challenge did you face today and how did you respond?",
+        "What are you grateful for right now?",
+        "What pattern in your behavior did you notice today?",
+        "What small win can you celebrate today?",
+    ],
+    "growth": [
+        "What's one fear you could face today?",
+        "What skill are you working on and what's your next small step?",
+        "What's holding you back from your goals right now?",
+        "What would you attempt if you knew you couldn't fail?",
+        "What's one habit you want to build? What's the smallest version of it?",
+    ],
+    "values": [
+        "What matters most to you right now?",
+        "How did you show up as the person you want to be today?",
+        "What's a value you hold that you haven't acted on lately?",
+        "What's your definition of success right now?",
+    ],
+    "mindfulness": [
+        "What thoughts keep repeating in your mind?",
+        "What emotion are you experiencing and where do you feel it?",
+        "What would self-compassion look like for you right now?",
+    ],
+    "action": [
+        "What's one action you can take today toward your biggest goal?",
+        "What would make today feel like a win?",
+        "What procrastination are you ready to address?",
+    ],
+    "relationships": [
+        "Who could you show appreciation for today?",
+        "What relationship needs more attention from you?",
+        "What do you need to communicate that you've been holding back?",
+    ],
+}
+
+PERSONALITY_PROMPTS = {
+    "I": ["What insights came from your alone time today?", "How did you protect your energy today?"],
+    "E": ["How did your interactions energize you today?", "What conversation sparked new ideas?"],
+    "S": ["What practical step did you take toward your goals?", "What worked well that you can replicate?"],
+    "N": ["What patterns or possibilities did you notice today?", "How does today connect to your bigger vision?"],
+    "T": ["What logical problem did you solve today?", "What objective analysis led to a good decision?"],
+    "F": ["How did you honor your values today?", "What emotional impact did your actions have?"],
+    "J": ["What did you complete today?", "How did your planning pay off?"],
+    "P": ["What opportunity did you seize by staying flexible?", "Where did you adapt successfully?"],
+}
+
+
+def _select_prompt(personality_type: str | None) -> dict:
+    import random
+    if personality_type and random.random() < 0.3:
+        all_pp = []
+        for ch in personality_type:
+            all_pp.extend(PERSONALITY_PROMPTS.get(ch, []))
+        if all_pp:
+            return {"text": random.choice(all_pp), "type": "personality"}
+    cat = random.choice(list(DAILY_PROMPTS.keys()))
+    return {"text": random.choice(DAILY_PROMPTS[cat]), "type": cat}
+
+
+@api.get("/daily-prompt")
+async def get_daily_prompt(user: User = Depends(get_current_user)):
+    today = datetime.now(timezone.utc).date().isoformat()
+    existing = await db.daily_prompts.find_one(
+        {"user_id": user.user_id, "prompt_date": today}, {"_id": 0}
+    )
+    if existing:
+        return existing
+    pa = await db.personality_assessments.find_one(
+        {"user_id": user.user_id}, {"_id": 0}, sort=[("created_at", -1)]
+    )
+    pt = (pa or {}).get("personality_type")
+    pick = _select_prompt(pt)
+    doc = {
+        "id": f"dp_{uuid.uuid4().hex[:12]}",
+        "user_id": user.user_id,
+        "prompt_date": today,
+        "prompt_text": pick["text"],
+        "prompt_type": pick["type"],
+        "response_text": None,
+        "is_completed": False,
+        "completed_at": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.daily_prompts.insert_one(dict(doc))
+    return doc
+
+
+@api.post("/daily-prompt/respond")
+async def respond_daily_prompt(payload: dict, user: User = Depends(get_current_user)):
+    today = datetime.now(timezone.utc).date().isoformat()
+    response_text = (payload.get("response") or "").strip()
+    if not response_text:
+        raise HTTPException(status_code=400, detail="Empty response")
+    res = await db.daily_prompts.update_one(
+        {"user_id": user.user_id, "prompt_date": today},
+        {
+            "$set": {
+                "response_text": response_text,
+                "is_completed": True,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="No prompt for today")
+    doc = await db.daily_prompts.find_one(
+        {"user_id": user.user_id, "prompt_date": today}, {"_id": 0}
+    )
+    return doc
+
+
+@api.get("/daily-prompts/history")
+async def daily_prompt_history(user: User = Depends(get_current_user)):
+    cursor = db.daily_prompts.find({"user_id": user.user_id}, {"_id": 0}).sort("prompt_date", -1).limit(180)
+    return await cursor.to_list(length=180)
+
+
+@api.delete("/daily-prompts/{prompt_id}")
+async def delete_daily_prompt(prompt_id: str, user: User = Depends(get_current_user)):
+    await db.daily_prompts.delete_one({"id": prompt_id, "user_id": user.user_id})
+    return {"ok": True}
+
+
 # ---------------------------- Health ----------------------------
 @api.get("/")
 async def root():

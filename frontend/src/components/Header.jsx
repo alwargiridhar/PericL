@@ -1,4 +1,5 @@
-import { Sun, Moon, BarChart3, LogOut, User } from "lucide-react";
+import { Sun, Moon, BarChart3, LogOut, User, MessageCircle, Calendar, Brain } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -14,6 +15,7 @@ import { useAuth } from "@/contexts/AuthContext";
 export default function Header({ onOpenRecaps }) {
     const { theme, toggle } = useTheme();
     const { user, logout } = useAuth();
+    const navigate = useNavigate();
 
     return (
         <header
@@ -34,6 +36,26 @@ export default function Header({ onOpenRecaps }) {
                 </div>
 
                 <div className="ml-auto flex items-center gap-1">
+                    <Button
+                        data-testid="header-chat-btn"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate("/chat")}
+                        className="rounded-full h-9 w-9"
+                        aria-label="Talk to PericL"
+                    >
+                        <MessageCircle className="w-4 h-4" />
+                    </Button>
+                    <Button
+                        data-testid="header-prompt-btn"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate("/daily-prompt")}
+                        className="rounded-full h-9 w-9"
+                        aria-label="Daily reflection"
+                    >
+                        <Calendar className="w-4 h-4" />
+                    </Button>
                     <Button
                         data-testid="header-recap-btn"
                         variant="ghost"
@@ -73,6 +95,21 @@ export default function Header({ onOpenRecaps }) {
                                 <div className="font-medium truncate">{user?.name}</div>
                                 <div className="text-xs text-muted-foreground truncate">{user?.email}</div>
                             </DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                                data-testid="menu-profile"
+                                onClick={() => navigate("/profile")}
+                            >
+                                <User className="w-4 h-4 mr-2" />
+                                My profile
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                data-testid="menu-personality"
+                                onClick={() => navigate("/personality/assessment")}
+                            >
+                                <Brain className="w-4 h-4 mr-2" />
+                                Personality test
+                            </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                                 data-testid="header-logout"

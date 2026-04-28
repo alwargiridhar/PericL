@@ -6,6 +6,11 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import AuthCallback from "@/components/AuthCallback";
 import Login from "@/pages/Login";
 import Journal from "@/pages/Journal";
+import AiChat from "@/pages/AiChat";
+import Profile from "@/pages/Profile";
+import PersonalityAssessment from "@/pages/PersonalityAssessment";
+import PersonalityResult from "@/pages/PersonalityResult";
+import DailyPrompt from "@/pages/DailyPrompt";
 
 function AppRouter() {
     const location = useLocation();
@@ -21,6 +26,46 @@ function AppRouter() {
                 element={
                     <ProtectedRoute>
                         <Journal />
+                    </ProtectedRoute>
+                }
+            />
+            <Route
+                path="/chat"
+                element={
+                    <ProtectedRoute>
+                        <AiChat />
+                    </ProtectedRoute>
+                }
+            />
+            <Route
+                path="/profile"
+                element={
+                    <ProtectedRoute>
+                        <Profile />
+                    </ProtectedRoute>
+                }
+            />
+            <Route
+                path="/personality/assessment"
+                element={
+                    <ProtectedRoute>
+                        <PersonalityAssessment />
+                    </ProtectedRoute>
+                }
+            />
+            <Route
+                path="/personality/result/:id"
+                element={
+                    <ProtectedRoute>
+                        <PersonalityResult />
+                    </ProtectedRoute>
+                }
+            />
+            <Route
+                path="/daily-prompt"
+                element={
+                    <ProtectedRoute>
+                        <DailyPrompt />
                     </ProtectedRoute>
                 }
             />

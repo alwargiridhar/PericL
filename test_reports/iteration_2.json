@@ -1,0 +1,51 @@
+{
+  "summary": "Iteration 2 — full backend + frontend verification of NEW features (Profile/Personality Builder, MBTI Assessment, AI Chat, Daily Prompt) on top of existing journal app. Backend: 36/36 pytest tests pass (14 existing journal + 22 new). Frontend: All 5 new pages render and functional flows (chat send+receive, profile save+persistence, full 32-question MBTI assessment ending on result page with AI-generated description+strengths+growth, daily prompt today→submit→discuss CTA, history tab) verified end-to-end. AI live calls (GPT-5.2 chat ~3-6s, MBTI analysis ~5-8s) work reliably.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/profile", "issue": "PUT /api/profile silently overwrites onboarding_completed based on a heuristic (any of name/goals/core_values/aspirations) every PUT — if user clears those fields, onboarding_completed is reset to false. Acceptable for MVP but documents a re-trigger of onboarding flow on partial edit."},
+      {"endpoint": "/api/personality/assess", "issue": "AI analysis fallback returns empty strengths/growth_areas arrays on LLM error. UI should handle empty arrays gracefully (it currently renders an empty section)."},
+      {"endpoint": "/api/daily-prompt", "issue": "Idempotency relies on (user_id, prompt_date) — no unique index. Concurrent first-of-day GETs could race-create two docs. Consider a unique compound index."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "AiChat / PersonalityAssessment / PersonalityResult / DailyPrompt", "issues": ["Sub-pages render their own minimal back-arrow header instead of the main Header component, so the global theme toggle (data-testid='header-theme-toggle') is not reachable from these pages. Theme is still applied globally via the html.dark class so colors do switch — but users must toggle from the journal home page first. Consider unifying via the main Header for consistency."]},
+      {"screen": "PersonalityAssessment", "issues": ["Last-question CTA is named via assessment-next, not assessment-submit. The review request mentioned 'See my type' submit testid — current implementation uses the same data-testid='assessment-next' for the final submit (works, but the review-request description of an 'assessment-submit' testid does not match)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pericl_new_features.py",
+    "/app/backend/tests/test_pericl_backend.py",
+    "/app/test_reports/pytest/pytest_new_results.xml",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Add unique compound index on daily_prompts (user_id, prompt_date) to harden the idempotency.",
+    "(Optional) Decide whether assessment final CTA should expose its own data-testid='assessment-submit' separate from 'assessment-next' for clarity. Currently the same Next button submits on the last question.",
+    "(Optional) Surface the theme toggle on sub-pages (Chat, Assessment, Result, DailyPrompt, Profile) by wrapping them in the main Header, or by adding a small theme button to the sub-page header."
+  ],
+  "critical_code_review_comments": [
+    "server.py /api/profile PUT: keys not in PROFILE_FIELDS are dropped silently — good. But onboarding_completed is recomputed on every PUT from update payload only, ignoring the existing DB doc. If the user PUTs only {age:31}, onboarding_completed will be set to False because none of the trigger fields are in the payload. Recommended: read existing doc and OR with current value, or never downgrade onboarding_completed once true.",
+    "server.py /api/ai/chat: builds convo by stringifying user/assistant turns and sends as a single UserMessage to LlmChat — works, but loses the structured chat-history advantage of the LLM SDK. Consider passing role-tagged history if the SDK supports it.",
+    "server.py /api/personality/assess: scores type is dict[str,int] — no validation that all 8 keys present or that sum is reasonable. compute_mbti uses .get(k,0), so a missing dimension defaults to a tie that resolves toward 'I/N/F/J'. Add Pydantic model validation.",
+    "server.py /api/daily-prompt: _select_prompt uses random.random() in request handler — not seeded for reproducibility across restarts; per-day idempotency saves the picked prompt so this is OK in practice.",
+    "frontend AiChat.jsx: chat-clear-btn renders only when messages exist — fine. After clear, user message bubble appears optimistically and assistant bubble after API responds; verified working with 14s wait."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pericl_new_features.py (created — 22 new tests)",
+    "/app/backend/tests/test_pericl_backend.py (token rotated to test_sess_1777379746360)"
+  ],
+  "success_rate": {
+    "backend": "100% (36/36 pytest tests; 22 new + 14 existing)",
+    "frontend": "100% of critical flows verified (Chat send+reply, Profile save+persistence, 32-q MBTI → AI result page render, Daily Prompt submit + history)"
+  },
+  "test_credentials": "session_token=test_sess_1777379746360 (user_id=test-user-pericl-1777377818066, email=alwar@test.local). Old token test_sess_1777377818066 has been rotated/expired.",
+  "seed_data_creation": "Tests create user_profile (TEST_Alwar UI), personality_assessment (computed types: INTJ from backend test, ESTJ from UI test), ai_messages (cleared between runs), daily_prompts for today, plus journal items from the legacy test. All scoped to the seeded test user.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "If session expired again, reseed via mongosh snippet in /app/memory/test_credentials.md and pass via env: PERICL_TEST_TOKEN=<new_token>. Both test files honor that env var. AI calls (chat/MBTI) take 5-15s — keep timeouts >= 60s for those endpoints. UI assessment uses single data-testid='assessment-next' for both Next and final Submit — main agent may want to rename last-question CTA testid for clarity.",
+  "rca of the issue": "No production bugs found. The only test breakage was the previously-seeded session token expiring; switching to the freshly-seeded token from the review request fixed all auth gates. All AI integrations (GPT-5.2 chat, GPT-5.2 categorization+MBTI analysis, Gemini 3 Flash recap) responded correctly in live calls."
+}

@@ -534,7 +534,11 @@ async def get_profile(user: User = Depends(get_current_user)):
 @api.put("/profile")
 async def update_profile(payload: dict, user: User = Depends(get_current_user)):
     update = {k: v for k, v in payload.items() if k in PROFILE_FIELDS}
-    completed = any(update.get(f) for f in ("name", "goals", "core_values", "aspirations"))
+    existing = await db.user_profiles.find_one({"user_id": user.user_id}, {"_id": 0})
+    merged = {**(existing or {}), **update}
+    completed = bool(existing and existing.get("onboarding_completed")) or any(
+        merged.get(f) for f in ("name", "goals", "core_values", "aspirations")
+    )
     update["onboarding_completed"] = completed
     update["user_id"] = user.user_id
     update["updated_at"] = datetime.now(timezone.utc).isoformat()

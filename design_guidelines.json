@@ -1,103 +1,81 @@
 {
-  "project": "PericL",
-  "theme": "light_and_dark",
-  "archetype": "Organic & Earthy",
-  "vibe": "Introspective, calm-but-alive, evocative, premium personal space",
-  "typography": {
-    "font_families": {
-      "headings": "Cabinet Grotesk",
-      "body": "Satoshi"
-    },
-    "scale_rules": {
-      "h1": "text-4xl sm:text-5xl tracking-tight font-medium",
-      "h2": "text-2xl sm:text-3xl tracking-tight font-medium",
-      "h3": "text-xl font-medium",
-      "body": "text-base leading-relaxed font-normal",
-      "caption": "text-sm tracking-wide uppercase font-medium"
-    },
-    "notes": "Do not use default bold. Use font-medium for emphasis. Enforce strict hierarchy. Avoid Inter or Roboto entirely."
+  "theme_and_archetype": {
+    "domain": "Personal Wellness, Journaling, Mental Clarity",
+    "theme": "Dual (Light/Dark supported via existing toggle)",
+    "archetype": "Archetype 1: Organic & Earthy (Adapted for dual-theme)",
+    "reasoning": "PericL is a personal mirror, not a tech assistant. It needs to feel intimate, calm, and grounded. The aesthetic must rely on natural textures, warm neutrals, and organic shapes rather than tech-bro or neon AI signals."
   },
-  "colors": {
-    "light": {
-      "background": "#F7F5F2",
-      "surface": "#FFFFFF",
-      "primary": "#556B52",
-      "primary_foreground": "#FFFFFF",
-      "secondary": "#EFECE5",
-      "secondary_foreground": "#2D372B",
-      "accent": "#8B5E3C",
-      "accent_foreground": "#FFFFFF",
-      "muted": "#E8E4DB",
-      "muted_foreground": "#5C665A",
-      "border": "#E8E4DB",
-      "text_primary": "#2D372B",
-      "text_secondary": "#5C665A"
+  "typography": {
+    "headings": {
+      "family": "Cormorant Garamond, serif (or a similar high-contrast classic serif)",
+      "classes": "font-serif tracking-tight text-foreground",
+      "usage": "Use for the Hero H1, Feature Wall section titles, and major conceptual statements."
     },
-    "dark": {
-      "background": "#121412",
-      "surface": "#1A1D1A",
-      "primary": "#94B08F",
-      "primary_foreground": "#121412",
-      "secondary": "#242823",
-      "secondary_foreground": "#E8EAE6",
-      "accent": "#D4A373",
-      "accent_foreground": "#121412",
-      "muted": "#292E28",
-      "muted_foreground": "#A0A69D",
-      "border": "#292E28",
-      "text_primary": "#E8EAE6",
-      "text_secondary": "#A0A69D"
+    "body": {
+      "family": "Manrope or Inter, sans-serif",
+      "classes": "font-sans leading-relaxed text-muted-foreground",
+      "usage": "Use for chat bubbles, descriptions, FAQ answers, and UI elements."
+    },
+    "scale": {
+      "h1": "text-5xl sm:text-6xl lg:text-7xl font-light",
+      "h2": "text-3xl sm:text-4xl lg:text-5xl font-light",
+      "h3": "text-xl sm:text-2xl font-medium",
+      "body": "text-base sm:text-lg"
     }
   },
-  "layout_and_spacing": {
-    "spacing_scale": "Use generous padding: p-4 for chat bubbles, p-6 for cards, p-8 for sections.",
-    "container": "max-w-2xl mx-auto (Mobile-first chat layout)",
-    "timeline_chat_pattern": {
-      "user_entries": "Right-aligned, max-w-[85%], slightly rounded corners, asymmetric border-radius (e.g., rounded-2xl rounded-br-sm)",
-      "ai_entries": "Left-aligned, max-w-[85%], muted background, rounded-2xl rounded-bl-sm",
-      "recap_cards": "Full width, bento-grid style structure inside, rich background texture."
-    },
-    "voice_dock": "Floating bottom bar, absolute/fixed positioned, z-50, crystal glassmorphism overlay."
+  "color_strategy": {
+    "background": "Use existing theme variables (bg-background). For highlighted sections or alternating blocks, use bg-secondary/30 or soft tinted surfaces.",
+    "primary": "Use existing hsl(var(--primary)). Ensure it feels like a subtle accent (e.g., in the 'Next Move' target icon or active states) rather than a loud dominant color.",
+    "chat_bubbles": "Rely on existing .bubble-mine and .bubble-them classes, but ensure they sit on a neutral or deeply calm background. Use subtle shadow-sm for depth.",
+    "accents": "Avoid stark black or pure white borders. Use border-border/50 or border-primary/10 for delicate separations."
   },
-  "surface_strategies": {
-    "voice_dock": "Crystal Glassmorphism: backdrop-blur-xl bg-white/70 (light) or bg-black/60 (dark), 1px delicate inner border.",
-    "daily_recap": "Neumorphic/Clay blend or flat solid with organic background image, subtle 1px border border-black/5.",
-    "badges": "Flat, pill-shaped, muted colors for tags like 'Tasks', 'Reminders'."
+  "layout_and_spacing": {
+    "general": "Embrace generous padding (p-12 to p-32). Do not center everything; use asymmetric, left-aligned typography to create an editorial, documentary feel.",
+    "hero": "Asymmetric bento or split grid. Left column: massive, confident serif typography + Google Auth button. Right column: The 'Mirror' interactive chat mockup, floating gracefully.",
+    "feature_wall": "Use a 2x2 or 3-col grid with generous gaps (gap-12 or gap-16). No hard 'cards'; go cardless or use extremely subtle 1px border with large padding.",
+    "privacy_block": "Visually distinct block. Use an earthy/muted background, bold typography, and a massive Lock icon to convey physical ownership of data."
   },
   "motion_and_interactions": {
-    "hover_states": "Slight lift (-translate-y-0.5) and subtle shadow increase for cards. Hover colors must be explicit.",
-    "waveform": "Live animation during recording, mapped to primary color.",
-    "chat_entry": "Slide up and fade in entrance animation (staggered for lists).",
-    "haptics": "Suggest compound gestures (swipe left to archive/dismiss) with simulated haptic feedback."
+    "scroll": "Use framer-motion for staggered entrance animations. Elements should 'fade up' softly (y: 20, opacity: 0 -> y: 0, opacity: 1).",
+    "blobs": "Keep the existing .blob CSS class active in the background for subtle organic movement.",
+    "chat_demo": "Stagger the entrance of the chat bubbles in the Hero to simulate a live response. First .bubble-mine appears, pause, then .bubble-them appears."
   },
-  "components_instructions": {
-    "buttons": "Rounded-full for main actions, highly tactile.",
-    "inputs": "Shadcn based but highly customized. No heavy borders, rely on background contrast.",
-    "cards": "Avoid generic Shadcn cards. Build custom bento-like containers with generous internal padding (p-6) to avoid text collision.",
-    "testing": "All interactive and key informational elements MUST include data-testid attribute in kebab-case."
+  "components_and_structure": {
+    "nav": "Minimal header with Logo (text), Theme Toggle (data-testid='login-theme-toggle'), and a secondary soft sign-in anchor.",
+    "hero_section": "Headline: 'Your inner voice, written down.' Subtitle: 'A personal journal that sorts your thoughts and reflects you back. No AI. Just you—clearer.' CTA: Google Login Button (data-testid='login-google-btn').",
+    "show_dont_tell_section": "A mockup of the Mirror interface. User: 'I'll start the launch tomorrow, today I'm too tired'. Mirror: 'You said launching matters. Pushing it off again is how nothing ships. 🎯 Next Move: open your draft and write 3 plain sentences for the launch tweet.'",
+    "features_clusters": {
+      "capture": "Speak or type. It automatically sorts into tasks, reminders, and ideas.",
+      "mirror": "A chat that talks back as you—calmer, more honest.",
+      "track": "Monitor up to 3 missions, track your mood, and review daily recaps in your own voice.",
+      "privacy": "Stays on your device by default. Cloud sync is strictly opt-in."
+    },
+    "faq_section": "Clean minimalist accordion or grid list. Q: 'Is this AI?' A: 'No. It's your own voice, written down.' Q: 'Where does my data live?' A: 'On your device, until you say otherwise.'",
+    "footer": "© Giridhar Alwar · PericL · Personal Voice Journal"
   },
-  "media": {
-    "images": [
-      {
-        "category": "empty_state",
-        "url": "https://static.prod-images.emergentagent.com/jobs/91eb5a19-f7fc-480a-9ee8-2cb548966239/images/a925322b43e910670225856670579aa821f5781f38637d4cf79560891b45e7ba.png",
-        "description": "Minimalist organic 3D shapes floating softly in a warm beige space, encouraging mood."
+  "media_and_assets": {
+    "images": {
+      "hero_background": {
+        "url": "https://images.pexels.com/photos/10487257/pexels-photo-10487257.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Abstract warm sand texture, use as an extremely low opacity (5-10%) background blend or mask to add organic texture to the page. Wrap in a div with pointer-events-none and absolute positioning."
       },
-      {
-        "category": "daily_recap_bg_light",
-        "url": "https://static.prod-images.emergentagent.com/jobs/91eb5a19-f7fc-480a-9ee8-2cb548966239/images/8220e1f3a964dddb6da19f29099cd749fe5c9e824848c697e3191c266d353bd2.png",
-        "description": "Soft gradient blur, morning sunlight, pale sage and warm sand colors."
-      },
-      {
-        "category": "daily_recap_bg_dark",
-        "url": "https://images.pexels.com/photos/5978451/pexels-photo-5978451.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
-        "description": "Detailed macro photograph showcasing intricate textures of a dried leaf, use with a dark overlay (bg-black/60) for dark mode recap cards."
-      },
-      {
-        "category": "texture_accent",
-        "url": "https://images.pexels.com/photos/6142118/pexels-photo-6142118.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
-        "description": "Closeup of thin fragile colorful tendrils, useful for ambient background layers."
+      "privacy_illustration": {
+        "url": "https://images.pexels.com/photos/16564254/pexels-photo-16564254.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "description": "Vintage lock to reinforce the physical, on-device privacy concept. Use creatively in the Privacy block."
       }
-    ]
-  }
+    },
+    "icons": "Lucide React (e.g., Mic, Sparkles, Lock, Target, Shield, LineChart, MessageSquare)"
+  },
+  "anti_patterns_to_avoid": {
+    "language": "NEVER use the words 'AI assistant', 'chatbot', 'powered by', or 'magic'.",
+    "visuals": "No purple gradients, no generic tech vectors, no centered-everything layouts."
+  },
+  "strict_preservations": [
+    "data-testid='login-google-btn'",
+    "data-testid='login-theme-toggle'",
+    "Existing startLogin() handler for the Google button",
+    "Must be implemented entirely within /app/frontend/src/pages/Login.jsx",
+    "Preserve 'useAuth' and 'useTheme' logic"
+  ],
+  "instructions_to_main_agent": "Redesign Login.jsx entirely using Tailwind CSS, framer-motion, and Lucide React. Implement the 'Show, Don't Tell' chat UI in the hero area to visually explain the app using the existing .bubble-mine and .bubble-them classes. Build clean, accessible markup. Ensure every interactive element has a kebab-case data-testid. Install framer-motion if not present. Use standard font-sans and font-serif but style them elegantly. Keep the vibe extremely calm, analog, and privacy-centric. Focus heavily on whitespace and typography."
 }

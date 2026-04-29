@@ -95,7 +95,7 @@ export default function Login() {
                         onClick={startLogin}
                         className="hidden sm:inline-flex text-sm text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-full"
                     >
-                        Sign in
+                        Open my mirror
                     </button>
                     <Button
                         data-testid="login-theme-toggle"
@@ -162,7 +162,7 @@ export default function Login() {
                             size="lg"
                         >
                             <GoogleMark />
-                            Continue with Google
+                            Open my mirror
                             <ArrowRight className="w-4 h-4 -mr-1" />
                         </Button>
                         <button
@@ -287,6 +287,41 @@ export default function Login() {
                 </div>
             </section>
 
+            {/* Look-inside product showcase — static, hand-crafted mockups */}
+            <section className="relative z-10 border-t border-border/40">
+                <div className="max-w-6xl mx-auto px-6 sm:px-10 py-20 sm:py-28">
+                    <Reveal>
+                        <div className="max-w-2xl">
+                            <div className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground inline-flex items-center gap-2">
+                                <LineChart className="w-3 h-3" /> Look inside
+                            </div>
+                            <h2 className="mt-3 font-display text-3xl sm:text-5xl tracking-tight leading-[1.05]">
+                                Real progress,
+                                <br />
+                                <span className="italic text-primary">tracked quietly.</span>
+                            </h2>
+                            <p className="mt-5 text-base sm:text-lg text-muted-foreground leading-relaxed">
+                                Missions sit in the corner of your screen. Mood lives as a single calm line.
+                                Both update on their own, from the thoughts you already speak.
+                            </p>
+                        </div>
+                    </Reveal>
+
+                    <div className="mt-14 grid lg:grid-cols-2 gap-6 lg:gap-10">
+                        <Reveal delay={1}>
+                            <MissionCardMockup />
+                        </Reveal>
+                        <Reveal delay={2}>
+                            <MoodChartMockup />
+                        </Reveal>
+                    </div>
+
+                    <Reveal delay={3} className="mt-10">
+                        <RecapStrip />
+                    </Reveal>
+                </div>
+            </section>
+
             {/* Privacy block — distinct visual rhythm */}
             <section className="relative z-10 border-t border-border/40">
                 <div className="max-w-6xl mx-auto px-6 sm:px-10 py-20 sm:py-28 grid lg:grid-cols-12 gap-12 items-center">
@@ -394,9 +429,12 @@ export default function Login() {
                                 size="lg"
                             >
                                 <GoogleMark />
-                                Continue with Google
+                                Start the loop · with Google
                                 <ArrowRight className="w-4 h-4 -mr-1" />
                             </Button>
+                            <p className="mt-4 text-xs text-muted-foreground">
+                                One sign-in. Free. Cancel any time — your data comes with you.
+                            </p>
                         </div>
                     </Reveal>
                 </div>
@@ -631,5 +669,191 @@ function GoogleMark() {
             <path d="M3.97 10.71A5.41 5.41 0 0 1 3.68 9c0-.59.1-1.17.29-1.71V4.96H.92A9 9 0 0 0 0 9a9 9 0 0 0 .92 4.04l3.05-2.33z" fill="#fff"/>
             <path d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 9 0 9 9 0 0 0 .92 4.96l3.05 2.33C4.68 5.16 6.66 3.58 9 3.58z" fill="#fff"/>
         </svg>
+    );
+}
+
+/* ---------- product mockups (no real screenshots — pure JSX) ---------- */
+
+function MissionCardMockup() {
+    const tracks = [
+        { name: "Chapters drafted", units: 6, target: 12, pct: 50 },
+        { name: "Edit passes", units: 2, target: 4, pct: 50 },
+        { name: "Hours of deep work", units: 18, target: 30, pct: 60 },
+    ];
+    return (
+        <div
+            className="rounded-[1.75rem] border border-border/60 bg-card/60 backdrop-blur-xl p-7 sm:p-8 shadow-xl shadow-black/5"
+            data-testid="mockup-mission-card"
+        >
+            <div className="flex items-start gap-3 mb-5">
+                <div className="w-10 h-10 rounded-2xl bg-accent/15 grid place-items-center shrink-0">
+                    <Target className="w-4.5 h-4.5 text-accent" strokeWidth={1.6} />
+                </div>
+                <div className="min-w-0 flex-1">
+                    <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                        Active mission · 84 days left
+                    </div>
+                    <div className="font-display text-xl tracking-tight mt-0.5">
+                        Finish the book draft
+                    </div>
+                </div>
+                <div className="text-right">
+                    <div className="text-2xl font-display tabular-nums">53%</div>
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">on pace</div>
+                </div>
+            </div>
+
+            <div className="space-y-4">
+                {tracks.map((t, i) => (
+                    <div key={i}>
+                        <div className="flex items-center justify-between text-[13px]">
+                            <span className="text-foreground/85">{t.name}</span>
+                            <span className="text-muted-foreground tabular-nums">{t.units} / {t.target}</span>
+                        </div>
+                        <div className="mt-1.5 h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                            <motion.div
+                                initial={{ width: 0 }}
+                                whileInView={{ width: `${t.pct}%` }}
+                                viewport={{ once: true }}
+                                transition={{ delay: 0.3 + i * 0.12, duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+                                className="h-full bg-primary rounded-full"
+                            />
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <div className="mt-6 pt-5 border-t border-border/50 flex items-center gap-3">
+                <Sparkles className="w-3.5 h-3.5 text-primary shrink-0" />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                    Detected from your last entry: <span className="text-foreground/85">+1 chapter, +2 hrs deep work</span>
+                </p>
+            </div>
+        </div>
+    );
+}
+
+function MoodChartMockup() {
+    // 30 fake mood points (1..7 scale). Stable shape: dip mid-month, recovery toward end.
+    const pts = [4, 4, 5, 4, 3, 4, 5, 5, 4, 3, 2, 3, 3, 2, 3, 4, 4, 5, 5, 6, 5, 5, 6, 6, 5, 6, 6, 5, 6, 7];
+    const W = 480, H = 160, pad = 12;
+    const max = 7, min = 1;
+    const stepX = (W - pad * 2) / (pts.length - 1);
+    const path = pts
+        .map((v, i) => {
+            const x = pad + i * stepX;
+            const y = H - pad - ((v - min) / (max - min)) * (H - pad * 2);
+            return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+        })
+        .join(" ");
+    const area = `${path} L ${(pad + (pts.length - 1) * stepX).toFixed(1)},${H - pad} L ${pad},${H - pad} Z`;
+
+    return (
+        <div
+            className="rounded-[1.75rem] border border-border/60 bg-card/60 backdrop-blur-xl p-7 sm:p-8 shadow-xl shadow-black/5"
+            data-testid="mockup-mood-chart"
+        >
+            <div className="flex items-start gap-3 mb-5">
+                <div className="w-10 h-10 rounded-2xl bg-primary/10 grid place-items-center shrink-0">
+                    <LineChart className="w-4.5 h-4.5 text-primary" strokeWidth={1.6} />
+                </div>
+                <div className="min-w-0 flex-1">
+                    <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                        Mood, last 30 days
+                    </div>
+                    <div className="font-display text-xl tracking-tight mt-0.5">
+                        Heavier mid-month. Lifting now.
+                    </div>
+                </div>
+                <div className="text-right">
+                    <div className="text-2xl font-display tabular-nums">4.6</div>
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">avg</div>
+                </div>
+            </div>
+
+            <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" preserveAspectRatio="none" aria-hidden>
+                <defs>
+                    <linearGradient id="moodArea" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.4" />
+                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0.02" />
+                    </linearGradient>
+                </defs>
+                {/* baseline grid */}
+                {[2, 4, 6].map((y) => (
+                    <line
+                        key={y}
+                        x1={pad}
+                        x2={W - pad}
+                        y1={H - pad - ((y - min) / (max - min)) * (H - pad * 2)}
+                        y2={H - pad - ((y - min) / (max - min)) * (H - pad * 2)}
+                        stroke="hsl(var(--border))"
+                        strokeDasharray="3 4"
+                        strokeWidth="0.5"
+                    />
+                ))}
+                <motion.path
+                    d={area}
+                    fill="url(#moodArea)"
+                    initial={{ opacity: 0 }}
+                    whileInView={{ opacity: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: 0.4, duration: 0.6 }}
+                />
+                <motion.path
+                    d={path}
+                    fill="none"
+                    stroke="hsl(var(--primary))"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    initial={{ pathLength: 0 }}
+                    whileInView={{ pathLength: 1 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 1.4, ease: [0.22, 1, 0.36, 1] }}
+                />
+                {/* end dot */}
+                <circle
+                    cx={pad + (pts.length - 1) * stepX}
+                    cy={H - pad - ((pts[pts.length - 1] - min) / (max - min)) * (H - pad * 2)}
+                    r="4"
+                    fill="hsl(var(--primary))"
+                    stroke="hsl(var(--background))"
+                    strokeWidth="2"
+                />
+            </svg>
+
+            <div className="mt-3 flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                <span>30 days ago</span>
+                <span>today</span>
+            </div>
+        </div>
+    );
+}
+
+function RecapStrip() {
+    return (
+        <div
+            className="rounded-[1.75rem] border border-border/60 bg-gradient-to-r from-primary/5 via-card/60 to-accent/5 p-6 sm:p-8 grid sm:grid-cols-12 gap-5 sm:gap-8 items-center"
+            data-testid="mockup-recap-strip"
+        >
+            <div className="sm:col-span-3 flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-background/70 backdrop-blur-sm border border-border/60 grid place-items-center shrink-0">
+                    <Calendar className="w-5 h-5 text-primary" strokeWidth={1.5} />
+                </div>
+                <div>
+                    <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                        Daily recap
+                    </div>
+                    <div className="font-display text-lg tracking-tight">Tonight, 9:30 pm</div>
+                </div>
+            </div>
+            <p className="sm:col-span-9 text-[15px] sm:text-base leading-relaxed text-foreground/85">
+                <span className="italic text-muted-foreground">From your day:</span>{" "}
+                You captured 7 thoughts, closed 3 tasks, and said the word
+                <span className="text-foreground"> &ldquo;tired&rdquo;</span> four times. Two ideas worth keeping —
+                pinned for tomorrow. Pace on the book draft is steady. The thing you&rsquo;ve been avoiding is
+                <span className="text-foreground"> the launch tweet</span>. Sleep on it.
+            </p>
+        </div>
     );
 }

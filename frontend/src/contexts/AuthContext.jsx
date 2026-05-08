@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { encryptionReady } from "@/lib/storage";
 
 const AuthContext = createContext({ user: null, loading: true });
 
@@ -9,6 +10,8 @@ export function AuthProvider({ children }) {
 
     const checkAuth = useCallback(async () => {
         try {
+            // Wait for the on-device key to load before any local reads happen.
+            await encryptionReady;
             const r = await api.get("/auth/me");
             setUser(r.data);
         } catch {

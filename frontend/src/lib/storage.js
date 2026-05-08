@@ -11,6 +11,19 @@
  */
 
 import { api } from "@/lib/api";
+import {
+    ensureEncryptedStorageReady,
+    getEncrypted,
+    setEncrypted,
+    removeEncrypted,
+    isEncryptionActive,
+} from "@/lib/encrypted_storage";
+
+// Kick off encryption init eagerly. Reads/writes after this resolves use the
+// device key transparently. We re-export the readiness promise for callers
+// that need to await (e.g. early app shell).
+export const encryptionReady = ensureEncryptedStorageReady();
+export { isEncryptionActive };
 
 const LS = {
     PROFILE: "pericl.profile",
@@ -65,17 +78,14 @@ async function idbDel(key) {
 
 // ---------- helpers ----------
 function lsGet(key, fallback) {
-    try {
-        const v = localStorage.getItem(key);
-        return v ? JSON.parse(v) : fallback;
-    } catch {
-        return fallback;
-    }
+    return getEncrypted(key, fallback);
 }
 function lsSet(key, val) {
-    try {
-        localStorage.setItem(key, JSON.stringify(val));
-    } catch {}
+    // Fire and forget — encryption is a microtask.
+    setEncrypted(key, val).catch(() => {});
+}
+function lsDel(key) {
+    removeEncrypted(key);
 }
 function uid(prefix) {
     return `${prefix}_${Math.random().toString(36).slice(2, 14)}`;

@@ -95,7 +95,7 @@ export default function Login() {
                         onClick={startLogin}
                         className="hidden sm:inline-flex text-sm text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-full"
                     >
-                        Open my mirror
+                        Start privately
                     </button>
                     <Button
                         data-testid="login-theme-toggle"
@@ -123,7 +123,7 @@ export default function Login() {
                             data-testid="landing-eyebrow"
                         >
                             <span className="w-1.5 h-1.5 rounded-full bg-primary inline-block" />
-                            A mirror, not an assistant
+                            A private behavioral OS
                         </span>
                     </motion.div>
 
@@ -134,9 +134,9 @@ export default function Login() {
                         className="mt-6 font-display tracking-tight text-5xl sm:text-6xl lg:text-7xl leading-[1.02]"
                         data-testid="landing-hero-headline"
                     >
-                        Your inner voice,
+                        Stop drifting.
                         <br />
-                        <span className="italic text-primary">written down.</span>
+                        <span className="italic text-primary">Start becoming.</span>
                     </motion.h1>
 
                     <motion.p
@@ -145,8 +145,8 @@ export default function Login() {
                         transition={{ delay: 0.15, duration: 0.55 }}
                         className="mt-7 text-lg sm:text-xl text-muted-foreground max-w-xl leading-relaxed"
                     >
-                        Speak a thought. PericL sorts it into tasks, reminders, and ideas — then talks back as you,
-                        a little calmer and a little more honest. No AI assistant. Just you, clearer.
+                        Your thoughts, distractions, goals, and actions — aligned in one private system that
+                        keeps you honest with yourself, without ever sending your reflections to anyone.
                     </motion.p>
 
                     <motion.div
@@ -162,7 +162,7 @@ export default function Login() {
                             size="lg"
                         >
                             <GoogleMark />
-                            Open my mirror
+                            Start privately
                             <ArrowRight className="w-4 h-4 -mr-1" />
                         </Button>
                         <button
@@ -170,7 +170,7 @@ export default function Login() {
                             onClick={() => scrollTo("mirror-demo")}
                             className="text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1.5 group self-start sm:self-auto px-2"
                         >
-                            See what it feels like
+                            See how it works
                             <ChevronDown className="w-3.5 h-3.5 transition-transform group-hover:translate-y-0.5" />
                         </button>
                     </motion.div>
@@ -182,7 +182,7 @@ export default function Login() {
                         className="mt-6 text-xs text-muted-foreground inline-flex items-center gap-2"
                     >
                         <Lock className="w-3 h-3" />
-                        Your thoughts stay on your device by default — you decide what travels.
+                        Local Private Mode by default. Even Pericl can&rsquo;t read your reflections.
                     </motion.p>
                 </div>
 
@@ -429,11 +429,11 @@ export default function Login() {
                                 size="lg"
                             >
                                 <GoogleMark />
-                                Start the loop · with Google
+                                Start privately · with Google
                                 <ArrowRight className="w-4 h-4 -mr-1" />
                             </Button>
                             <p className="mt-4 text-xs text-muted-foreground">
-                                One sign-in. Free. Cancel any time — your data comes with you.
+                                Free forever · Local Private Mode by default · upgrade only if you want depth.
                             </p>
                         </div>
                     </Reveal>

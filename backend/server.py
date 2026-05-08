@@ -63,6 +63,9 @@ class User(BaseModel):
     picture: str | None = None
     role: str = "user"  # "user" | "admin" | "super_admin"
     created_at: datetime
+    is_premium: bool = False
+    plan: str = "free"  # "free" | "premium_monthly" | "premium_yearly"
+    plan_renews_at: datetime | None = None
 
 
 ItemType = Literal["voice", "text", "task", "reminder", "idea"]
@@ -152,7 +155,8 @@ async def get_current_user(request: Request) -> User:
         except Exception:
             pass
     asyncio.create_task(_touch())
-    return User(**{k: user_doc[k] for k in ("user_id", "email", "name", "picture", "role", "created_at") if k in user_doc})
+    fields = ("user_id", "email", "name", "picture", "role", "created_at", "is_premium", "plan", "plan_renews_at")
+    return User(**{k: user_doc[k] for k in fields if k in user_doc})
 
 
 def _ensure_role(user: User, *, allowed: tuple[str, ...]):
@@ -811,6 +815,7 @@ def _build_chat_system_message(
     behavior: dict | None = None,
     current_mood: str | None = None,
     missions: list[dict] | None = None,
+    style: dict | None = None,
 ) -> str:
     top_goals = _parse_top_goals((profile or {}).get("goals"))
     identity = (profile or {}).get("aspirations") or ""
@@ -926,6 +931,20 @@ def _build_chat_system_message(
     if current_mood:
         ctx.append(f"- current input mood: {current_mood}")
 
+    # Communication-style mirror — match the user's voice subtly.
+    if style:
+        ctx.append("- USER STYLE (mirror this in your reply):")
+        if style.get("avg_sentence_len"):
+            ctx.append(f"    avg sentence length: ~{style['avg_sentence_len']} words")
+        if style.get("formality"):
+            ctx.append(f"    formality: {style['formality']} (write the same)")
+        if style.get("uses_lowercase"):
+            ctx.append("    they don't capitalise — keep your reply lowercase too")
+        if style.get("uses_emoji") is False:
+            ctx.append("    no emoji except the required 🎯")
+        if style.get("top_phrases"):
+            ctx.append(f"    phrases they use: {', '.join(style['top_phrases'][:3])}")
+
     return "\n".join(parts) + "\n" + "\n".join(ctx)
 
 
@@ -940,6 +959,15 @@ async def chat_send(payload: dict, user: User = Depends(get_current_user)):
     message = (payload.get("message") or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="Empty message")
+
+    # Free-tier daily limit on assistant replies
+    if not user.is_premium:
+        remaining = await _free_chat_remaining(user)
+        if remaining <= 0:
+            raise HTTPException(
+                status_code=402,
+                detail="You've reached your free mirror replies for today. Upgrade to keep going.",
+            )
 
     # Persist user message
     user_msg = {
@@ -980,14 +1008,15 @@ async def chat_send(payload: dict, user: User = Depends(get_current_user)):
     # a second LLM round-trip per chat send (saves ~3-6s).
     current_mood = _infer_mood_quick(message)
 
-    sys_msg = _build_chat_system_message(
-        profile, personality_doc, moods,
-        behavior=behavior, current_mood=current_mood, missions=missions_with_stats,
-    )
-
     # History — keep last 16 turns for context
     history_cursor = db.ai_messages.find({"user_id": user.user_id}, {"_id": 0}).sort("created_at", -1).limit(16)
     hist = list(reversed(await history_cursor.to_list(length=16)))
+    style = _extract_communication_style(hist)
+    sys_msg = _build_chat_system_message(
+        profile, personality_doc, moods,
+        behavior=behavior, current_mood=current_mood, missions=missions_with_stats,
+        style=style,
+    )
     convo = ""
     for m in hist[:-1]:  # exclude the user msg we just inserted (it's last)
         prefix = "User" if m["role"] == "user" else "PericL"
@@ -1213,10 +1242,12 @@ async def stateless_chat(payload: dict, user: User = Depends(get_current_user)):
     behavior = payload.get("behavior") or None
     current_mood = payload.get("current_mood") or None
     missions = payload.get("missions") or None
+    style = _extract_communication_style(history)
 
     sys_msg = _build_chat_system_message(
         profile, personality, moods,
         behavior=behavior, current_mood=current_mood, missions=missions,
+        style=style,
     )
     convo = ""
     for m in history[-16:]:
@@ -1803,7 +1834,8 @@ async def stateless_detect_progress(payload: dict, user: User = Depends(get_curr
     return detection or {"mission_id": None, "track_id": None, "units": 0, "effort": "medium", "confidence": 0}
 
 
-async def ai_drift_nudge(profile: dict | None, missions: list[dict] | None, minutes_away: int) -> dict:
+async def ai_drift_nudge(profile: dict | None, missions: list[dict] | None, minutes_away: int,
+                         personality: dict | None = None, drift_count_today: int = 0) -> dict:
     """Generate a short, humble nudge asking the user to put the phone down
     and take one small step back toward their stated goal. Returns:
       { "message": str (1-2 sentences, warm second person),
@@ -1822,6 +1854,27 @@ async def ai_drift_nudge(profile: dict | None, missions: list[dict] | None, minu
             goals_text = (goals_text + "\n" + "\n".join(m_lines)).strip()
     goals_text = (goals_text or "(no explicit goals yet)").strip()
 
+    personality_hint = ""
+    if personality:
+        pt = personality.get("personality_type") or ""
+        scores = personality.get("scores") or {}
+        if pt == "BIG5" and scores:
+            # higher-N → softer tone; higher-C → more direct.
+            n = int(scores.get("N", 50))
+            c = int(scores.get("C", 50))
+            personality_hint = (
+                f"User's Big Five: O={scores.get('O','?')}, C={c}, E={scores.get('E','?')}, "
+                f"A={scores.get('A','?')}, N={n}. "
+                f"{'Soften the tone — they feel things deeply.' if n > 60 else ''}"
+                f"{' They respond well to direct, small commitments.' if c > 60 else ''}"
+            )
+        elif pt:
+            personality_hint = f"User MBTI: {pt} ({personality.get('type_name','')}). Match the inferred tone."
+
+    repeat_hint = ""
+    if drift_count_today >= 2:
+        repeat_hint = f"This is the {drift_count_today + 1}th drift today — name it once, gently, no shame."
+
     sys = (
         "You are the user's own reflective inner voice — NOT an assistant, NOT an AI. "
         "The user has been away from their journal for a long time, likely scrolling on their phone. "
@@ -1830,7 +1883,9 @@ async def ai_drift_nudge(profile: dict | None, missions: list[dict] | None, minu
         "Return ONLY JSON: "
         "{\"message\": str (1-2 sentences, second person, anchored to their actual goal), "
         "\"next_move\": str (one specific action under 15 minutes, concrete and small)}. "
-        "Do not mention Instagram, YouTube, TikTok, or shame them. Say it like a friend would."
+        "Do not mention Instagram, YouTube, TikTok, or shame them. Say it like a friend would. "
+        + (personality_hint + " " if personality_hint else "")
+        + (repeat_hint if repeat_hint else "")
     )
     chat = (
         LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"drift-{uuid.uuid4().hex[:8]}", system_message=sys)
@@ -1867,19 +1922,25 @@ async def ai_drift_nudge(profile: dict | None, missions: list[dict] | None, minu
 @api.post("/ai/drift-nudge")
 async def cloud_drift_nudge(payload: dict, user: User = Depends(get_current_user)):
     minutes_away = int(payload.get("minutes_away") or 30)
+    drift_count_today = int(payload.get("drift_count_today") or 0)
     profile = await db.user_profiles.find_one({"user_id": user.user_id}, {"_id": 0})
     mission_docs = await db.missions.find(
         {"user_id": user.user_id, "is_active": True}, {"_id": 0}
     ).sort("created_at", -1).limit(3).to_list(length=3)
-    return await ai_drift_nudge(profile, mission_docs, minutes_away)
+    personality = await db.personality_assessments.find_one(
+        {"user_id": user.user_id}, {"_id": 0}, sort=[("created_at", -1)]
+    )
+    return await ai_drift_nudge(profile, mission_docs, minutes_away, personality, drift_count_today)
 
 
 @api.post("/ai/drift-nudge-stateless")
 async def stateless_drift_nudge(payload: dict):
     minutes_away = int(payload.get("minutes_away") or 30)
+    drift_count_today = int(payload.get("drift_count_today") or 0)
     profile = payload.get("profile") or None
     missions = payload.get("missions") or []
-    return await ai_drift_nudge(profile, missions, minutes_away)
+    personality = payload.get("personality") or None
+    return await ai_drift_nudge(profile, missions, minutes_away, personality, drift_count_today)
 
 
 # ---------------------------- Health ----------------------------
@@ -1928,6 +1989,13 @@ async def chat_send_stream(payload: dict, user: User = Depends(get_current_user)
     message = (payload.get("message") or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="Empty message")
+    if not user.is_premium:
+        remaining = await _free_chat_remaining(user)
+        if remaining <= 0:
+            raise HTTPException(
+                status_code=402,
+                detail="You've reached your free mirror replies for today. Upgrade to keep going.",
+            )
 
     user_msg = {
         "id": f"m_{uuid.uuid4().hex[:12]}",
@@ -1963,6 +2031,12 @@ async def chat_send_stream(payload: dict, user: User = Depends(get_current_user)
     )
     history_cursor = db.ai_messages.find({"user_id": user.user_id}, {"_id": 0}).sort("created_at", -1).limit(16)
     hist = list(reversed(await history_cursor.to_list(length=16)))
+    style = _extract_communication_style(hist)
+    sys_msg = _build_chat_system_message(
+        profile, personality_doc, moods,
+        behavior=behavior, current_mood=current_mood, missions=missions_with_stats,
+        style=style,
+    )
     convo = ""
     for m in hist[:-1]:
         prefix = "User" if m["role"] == "user" else "PericL"
@@ -2007,10 +2081,12 @@ async def stateless_chat_stream(payload: dict, user: User = Depends(get_current_
     behavior = payload.get("behavior") or None
     current_mood = payload.get("current_mood") or None
     missions = payload.get("missions") or None
+    style = _extract_communication_style(history)
 
     sys_msg = _build_chat_system_message(
         profile, personality, moods,
         behavior=behavior, current_mood=current_mood, missions=missions,
+        style=style,
     )
     convo = ""
     for m in history[-16:]:
@@ -2284,6 +2360,486 @@ async def admin_audit_log(limit: int = 100, admin: User = Depends(get_admin_user
     limit = max(1, min(500, int(limit or 100)))
     cursor = db.admin_audit_log.find({}, {"_id": 0}).sort("created_at", -1).limit(limit)
     return await cursor.to_list(length=limit)
+
+
+# ============================================================
+# Phase A — Behavioral engine: Self-Trust + Execution scores
+# ============================================================
+def _date_key(iso: str | None) -> str | None:
+    if not iso:
+        return None
+    try:
+        return iso[:10]
+    except Exception:
+        return None
+
+
+def _compute_scores(items: list[dict], chats: list[dict], days: int = 14) -> dict:
+    """Pure-function score engine. Inputs are already-loaded dicts so we can
+    reuse for both cloud and stateless variants.
+    Returns:
+        {
+          self_trust: 0..100,
+          execution: 0..100,
+          consistency_days: int,
+          drift_signal: str | None,
+          stats: {...}
+        }
+    """
+    now = datetime.now(timezone.utc)
+    horizon = now - timedelta(days=days)
+    horizon_iso = horizon.isoformat()
+
+    voice_or_text = [i for i in items if i.get("type") in ("voice", "text") and (i.get("created_at") or "") >= horizon_iso]
+    tasks = [i for i in items if i.get("type") == "task" and (i.get("created_at") or "") >= horizon_iso]
+    reminders = [i for i in items if i.get("type") == "reminder" and (i.get("created_at") or "") >= horizon_iso]
+
+    captures_per_day = len(voice_or_text) / max(1, days)
+    tasks_total = len(tasks)
+    tasks_done = sum(1 for t in tasks if t.get("completed"))
+    reminders_total = len(reminders)
+    reminders_done = sum(1 for r in reminders if r.get("completed"))
+
+    # Active days = unique days with any capture.
+    days_active = len({_date_key(i.get("created_at")) for i in voice_or_text if i.get("created_at")} - {None})
+    consistency_days = days_active  # 0..days
+
+    # --- Execution Score (do you actually do what you said you'd do?) ---
+    # weight task completion + reminder completion + recent activity.
+    task_rate = (tasks_done / tasks_total) if tasks_total else 0.5  # neutral if none
+    rem_rate = (reminders_done / reminders_total) if reminders_total else 0.5
+    activity_norm = min(1.0, captures_per_day / 1.5)  # ~1.5/day = full credit
+    execution = round((task_rate * 0.45 + rem_rate * 0.20 + activity_norm * 0.35) * 100)
+
+    # --- Self-Trust Score (consistency + intention follow-through) ---
+    # weight: consistency 50%, task completion 30%, reminder completion 20%
+    cons_norm = consistency_days / max(1, days)  # 0..1
+    self_trust = round((cons_norm * 0.50 + task_rate * 0.30 + rem_rate * 0.20) * 100)
+
+    # --- Drift signal (a 1-sentence pattern callout, deterministic) ---
+    drift_signal = None
+    last_capture_iso = max((i.get("created_at") for i in voice_or_text), default=None)
+    if last_capture_iso:
+        try:
+            last_dt = datetime.fromisoformat(last_capture_iso.replace("Z", "+00:00"))
+            hours_since = (now - last_dt).total_seconds() / 3600.0
+        except Exception:
+            hours_since = 0
+    else:
+        hours_since = days * 24
+
+    if not voice_or_text:
+        drift_signal = "Nothing captured this week — when did you last say what was actually on your mind?"
+    elif hours_since > 48:
+        drift_signal = f"It's been {int(hours_since/24)} days since you last wrote anything down."
+    elif tasks_total >= 3 and tasks_done == 0:
+        drift_signal = f"You've named {tasks_total} things to do — none done yet."
+    elif reminders_total > 0 and reminders_done == 0:
+        drift_signal = "You set reminders but haven't followed through on any."
+    elif consistency_days < 3 and days >= 7:
+        drift_signal = f"Only {consistency_days} active day(s) in the last week — momentum is thin."
+
+    return {
+        "self_trust": max(0, min(100, self_trust)),
+        "execution": max(0, min(100, execution)),
+        "consistency_days": consistency_days,
+        "drift_signal": drift_signal,
+        "stats": {
+            "captures": len(voice_or_text),
+            "captures_per_day": round(captures_per_day, 2),
+            "tasks_total": tasks_total,
+            "tasks_done": tasks_done,
+            "reminders_total": reminders_total,
+            "reminders_done": reminders_done,
+            "hours_since_last_capture": round(hours_since, 1),
+        },
+    }
+
+
+@api.get("/scores")
+async def get_scores(days: int = 14, user: User = Depends(get_current_user)):
+    days = max(7, min(60, int(days or 14)))
+    horizon = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    items = await db.journal_items.find(
+        {"user_id": user.user_id, "created_at": {"$gte": horizon}}, {"_id": 0}
+    ).to_list(length=2000)
+    return _compute_scores(items, [], days=days)
+
+
+@api.post("/scores-stateless")
+async def stateless_scores(payload: dict):
+    days = max(7, min(60, int(payload.get("days") or 14)))
+    items = payload.get("items") or []
+    return _compute_scores(items, [], days=days)
+
+
+# ============================================================
+# Phase A — Next move (single, anchored to top mission/goal)
+# ============================================================
+async def ai_next_move(profile: dict | None, missions: list[dict] | None,
+                       drift_signal: str | None, scores: dict | None) -> dict:
+    """Return a single next move under 15 minutes that the user can take RIGHT NOW.
+    Returns: { headline: str, action: str, anchor: str (which goal/mission) }
+    """
+    goals_text = ""
+    if profile and profile.get("goals"):
+        goals_text = profile["goals"]
+    if missions:
+        m_lines = []
+        for m in missions[:3]:
+            t = m.get("outcome") or m.get("title") or ""
+            if t:
+                m_lines.append(f"- {t}")
+        if m_lines:
+            goals_text = (goals_text + "\n" + "\n".join(m_lines)).strip()
+    goals_text = (goals_text or "(no explicit goals yet)").strip()
+
+    sys = (
+        "You are the user's reflective inner voice. Their score data and active goals follow. "
+        "Generate ONE next move under 15 minutes that they can do RIGHT NOW. "
+        "Return ONLY JSON: "
+        "{\"headline\": str (5-9 words, gentle, NOT motivational shouting), "
+        "\"action\": str (one specific concrete action under 15 min, second person), "
+        "\"anchor\": str (which goal or mission this serves)}. "
+        "Never use the words 'AI', 'assistant', 'chatbot'. Never moralise. Never list multiple actions."
+    )
+    chat = (
+        LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"nm-{uuid.uuid4().hex[:8]}", system_message=sys)
+        .with_model("openai", "gpt-5.2")
+    )
+    user_text = (
+        f"Goals/Missions:\n{goals_text}\n\n"
+        f"Drift signal: {drift_signal or '(none)'}\n"
+        f"Self-trust: {(scores or {}).get('self_trust','?')}/100, "
+        f"Execution: {(scores or {}).get('execution','?')}/100, "
+        f"Consistency: {(scores or {}).get('consistency_days','?')} days."
+    )
+    try:
+        raw = (await chat.send_message(UserMessage(text=user_text))).strip()
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if m:
+            d = json.loads(m.group(0))
+            if d.get("headline") and d.get("action"):
+                return {
+                    "headline": d["headline"].strip(),
+                    "action": d["action"].strip(),
+                    "anchor": (d.get("anchor") or "").strip(),
+                }
+    except Exception as e:
+        logger.warning("next-move fallback: %s", e)
+    first_goal = (goals_text.splitlines() or ["what matters to you"])[0].lstrip("- ").strip() or "what matters to you"
+    return {
+        "headline": "Smallest move back to today.",
+        "action": f"Open your journal and write one honest sentence about {first_goal}.",
+        "anchor": first_goal,
+    }
+
+
+@api.get("/insights/today")
+async def insights_today(user: User = Depends(get_current_user)):
+    horizon = (datetime.now(timezone.utc) - timedelta(days=14)).isoformat()
+    items = await db.journal_items.find(
+        {"user_id": user.user_id, "created_at": {"$gte": horizon}}, {"_id": 0}
+    ).to_list(length=2000)
+    profile = await db.user_profiles.find_one({"user_id": user.user_id}, {"_id": 0})
+    missions_docs = await db.missions.find(
+        {"user_id": user.user_id, "is_active": True}, {"_id": 0}
+    ).sort("created_at", -1).limit(3).to_list(length=3)
+    missions_with_stats = [await _serialize_mission(m) for m in missions_docs]
+    scores = _compute_scores(items, [], days=14)
+    next_move = await ai_next_move(profile, missions_with_stats, scores.get("drift_signal"), scores)
+    return {"scores": scores, "next_move": next_move, "missions": missions_with_stats}
+
+
+@api.post("/insights/today-stateless")
+async def insights_today_stateless(payload: dict):
+    items = payload.get("items") or []
+    profile = payload.get("profile") or None
+    missions = payload.get("missions") or []
+    scores = _compute_scores(items, [], days=14)
+    next_move = await ai_next_move(profile, missions, scores.get("drift_signal"), scores)
+    return {"scores": scores, "next_move": next_move, "missions": missions}
+
+
+# ============================================================
+# Phase B — Personality history + Communication style mirroring
+# ============================================================
+@api.get("/personality/history")
+async def personality_history(user: User = Depends(get_current_user)):
+    docs = await db.personality_assessments.find(
+        {"user_id": user.user_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(length=50)
+    return docs
+
+
+def _extract_communication_style(messages: list[dict]) -> dict:
+    """Extract shallow, on-the-fly stylistic signals from the user's recent
+    messages. Used to make the Mirror sound a bit more like the user.
+    Returns: { avg_sentence_len, formality, top_phrases, uses_lowercase, uses_emoji }
+    """
+    user_msgs = [m for m in messages if m.get("role") == "user"]
+    text = " ".join(m.get("content", "") for m in user_msgs[-20:])
+    if not text.strip():
+        return {}
+    sentences = [s.strip() for s in re.split(r"[.!?]+\s+", text) if s.strip()]
+    avg_len = round(sum(len(s.split()) for s in sentences) / max(1, len(sentences)), 1)
+    # crude formality: lowercase ratio + contractions
+    letters = [c for c in text if c.isalpha()]
+    lower_ratio = sum(1 for c in letters if c.islower()) / max(1, len(letters))
+    formality = "informal" if lower_ratio > 0.92 else ("casual" if lower_ratio > 0.85 else "formal")
+    uses_lowercase = lower_ratio > 0.92 and "I " not in text  # they don't capitalise
+    # frequent short phrases (2-3 word n-grams)
+    words = re.findall(r"[a-zA-Z']+", text.lower())
+    phrases = {}
+    for n in (2, 3):
+        for i in range(len(words) - n + 1):
+            ph = " ".join(words[i:i + n])
+            if any(s in ph for s in ("the", "and", "for", "to", "of", "is", "i ", "a ", "you")) and n == 2:
+                continue
+            phrases[ph] = phrases.get(ph, 0) + 1
+    top = sorted(phrases.items(), key=lambda x: -x[1])[:5]
+    top_phrases = [p for p, c in top if c >= 2]
+    uses_emoji = bool(re.search(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", text))
+    return {
+        "avg_sentence_len": avg_len,
+        "formality": formality,
+        "uses_lowercase": uses_lowercase,
+        "uses_emoji": uses_emoji,
+        "top_phrases": top_phrases,
+    }
+
+
+# ============================================================
+# Phase C — Stripe subscriptions, region pricing, free-tier limits
+# ============================================================
+PRICING_PACKAGES = {
+    "premium_monthly_us":  {"amount": 7.99,  "currency": "usd", "interval": "month", "label": "Premium · monthly"},
+    "premium_yearly_us":   {"amount": 69.00, "currency": "usd", "interval": "year",  "label": "Premium · yearly"},
+    "premium_monthly_in":  {"amount": 199.0, "currency": "inr", "interval": "month", "label": "Premium · monthly"},
+    "premium_yearly_in":   {"amount": 1499.0, "currency": "inr", "interval": "year",  "label": "Premium · yearly"},
+}
+
+_FREE_DAILY_MIRROR_LIMIT = 5
+_FREE_MAX_ACTIVE_MISSIONS = 3
+
+
+def _today_utc_key() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+async def _free_chat_remaining(user: User) -> int:
+    """Returns how many mirror replies the user has left today on free tier."""
+    if user.is_premium:
+        return 999
+    today_key = _today_utc_key()
+    n = await db.ai_messages.count_documents({
+        "user_id": user.user_id,
+        "role": "assistant",
+        "created_at": {"$gte": today_key},
+    })
+    return max(0, _FREE_DAILY_MIRROR_LIMIT - n)
+
+
+def _stripe_checkout(http_request: Request) -> "StripeCheckout":  # type: ignore  # noqa: F821
+    from emergentintegrations.payments.stripe.checkout import StripeCheckout
+    api_key = os.environ.get("STRIPE_API_KEY", "sk_test_emergent")
+    host = str(http_request.base_url).rstrip("/")
+    webhook_url = f"{host}/api/webhook/stripe"
+    return StripeCheckout(api_key=api_key, webhook_url=webhook_url)
+
+
+@api.get("/billing/pricing")
+async def billing_pricing(region: str = "us"):
+    """Public endpoint: list packages for the requested region (us|in)."""
+    region = (region or "us").lower()
+    if region not in ("us", "in"):
+        region = "us"
+    out = []
+    for pkg_id, pkg in PRICING_PACKAGES.items():
+        if not pkg_id.endswith(f"_{region}"):
+            continue
+        out.append({"id": pkg_id, **pkg})
+    return {"region": region, "packages": out}
+
+
+@api.post("/billing/checkout")
+async def billing_checkout(payload: dict, http_request: Request, user: User = Depends(get_current_user)):
+    from emergentintegrations.payments.stripe.checkout import CheckoutSessionRequest
+    pkg_id = payload.get("package_id")
+    origin = (payload.get("origin") or "").rstrip("/")
+    if pkg_id not in PRICING_PACKAGES:
+        raise HTTPException(status_code=400, detail="Invalid package")
+    if not origin:
+        raise HTTPException(status_code=400, detail="Missing origin")
+    pkg = PRICING_PACKAGES[pkg_id]
+    success_url = f"{origin}/account?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{origin}/pricing"
+    metadata = {
+        "user_id": user.user_id,
+        "email": user.email,
+        "package_id": pkg_id,
+        "interval": pkg["interval"],
+    }
+    sc = _stripe_checkout(http_request)
+    req = CheckoutSessionRequest(
+        amount=float(pkg["amount"]),
+        currency=pkg["currency"],
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata=metadata,
+    )
+    session = await sc.create_checkout_session(req)
+    await db.payment_transactions.insert_one({
+        "session_id": session.session_id,
+        "user_id": user.user_id,
+        "email": user.email,
+        "package_id": pkg_id,
+        "amount": float(pkg["amount"]),
+        "currency": pkg["currency"],
+        "interval": pkg["interval"],
+        "metadata": metadata,
+        "payment_status": "initiated",
+        "status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"url": session.url, "session_id": session.session_id}
+
+
+@api.get("/billing/status/{session_id}")
+async def billing_status(session_id: str, http_request: Request, user: User = Depends(get_current_user)):
+    rec = await db.payment_transactions.find_one({"session_id": session_id, "user_id": user.user_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Unknown session")
+    sc = _stripe_checkout(http_request)
+    status_resp = await sc.get_checkout_status(session_id)
+    paid = status_resp.payment_status == "paid"
+    new_payment_status = status_resp.payment_status
+    new_status = status_resp.status
+    update = {
+        "payment_status": new_payment_status,
+        "status": new_status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # Idempotent premium grant — only flip the user once per session.
+    if paid and rec.get("payment_status") != "paid":
+        pkg_id = rec.get("package_id") or ""
+        plan = "premium_yearly" if "yearly" in pkg_id else "premium_monthly"
+        days = 366 if plan == "premium_yearly" else 31
+        renews_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+        await db.users.update_one(
+            {"user_id": user.user_id},
+            {"$set": {
+                "is_premium": True,
+                "plan": plan,
+                "plan_renews_at": renews_at,
+                "premium_started_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        update["granted_at"] = datetime.now(timezone.utc).isoformat()
+    await db.payment_transactions.update_one({"session_id": session_id}, {"$set": update})
+    return {
+        "session_id": session_id,
+        "payment_status": new_payment_status,
+        "status": new_status,
+        "amount": status_resp.amount_total / 100.0,
+        "currency": status_resp.currency,
+    }
+
+
+@api.post("/webhook/stripe")
+async def stripe_webhook(http_request: Request):
+    body = await http_request.body()
+    sig = http_request.headers.get("Stripe-Signature", "")
+    try:
+        sc = _stripe_checkout(http_request)
+        evt = await sc.handle_webhook(body, sig)
+    except Exception as e:
+        logger.warning("stripe webhook parse failed: %s", e)
+        raise HTTPException(status_code=400, detail="bad webhook")
+    # We only act on completed payments; checkout.session.completed
+    if not evt.session_id:
+        return {"ok": True}
+    rec = await db.payment_transactions.find_one({"session_id": evt.session_id}, {"_id": 0})
+    if not rec:
+        return {"ok": True}
+    update = {
+        "payment_status": evt.payment_status,
+        "event_type": evt.event_type,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if evt.payment_status == "paid" and rec.get("payment_status") != "paid":
+        pkg_id = rec.get("package_id") or ""
+        plan = "premium_yearly" if "yearly" in pkg_id else "premium_monthly"
+        days = 366 if plan == "premium_yearly" else 31
+        renews_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+        await db.users.update_one(
+            {"user_id": rec["user_id"]},
+            {"$set": {
+                "is_premium": True,
+                "plan": plan,
+                "plan_renews_at": renews_at,
+                "premium_started_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        update["granted_at"] = datetime.now(timezone.utc).isoformat()
+    await db.payment_transactions.update_one({"session_id": evt.session_id}, {"$set": update})
+    return {"ok": True}
+
+
+@api.get("/billing/me")
+async def billing_me(user: User = Depends(get_current_user)):
+    """Subscription summary + free-tier remaining counters."""
+    remaining = await _free_chat_remaining(user)
+    active_missions = await db.missions.count_documents({"user_id": user.user_id, "is_active": True})
+    return {
+        "is_premium": user.is_premium,
+        "plan": user.plan,
+        "plan_renews_at": user.plan_renews_at.isoformat() if user.plan_renews_at else None,
+        "limits": {
+            "mirror_remaining_today": remaining if not user.is_premium else None,
+            "mirror_daily_limit": _FREE_DAILY_MIRROR_LIMIT if not user.is_premium else None,
+            "max_active_missions": _FREE_MAX_ACTIVE_MISSIONS if not user.is_premium else None,
+            "active_missions": active_missions,
+        },
+    }
+
+
+# ============================================================
+# Phase C — Admin analytics expansion
+# ============================================================
+@api.get("/admin/analytics")
+async def admin_analytics(admin: User = Depends(get_admin_user)):
+    total_users = await db.users.count_documents({})
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    active_7d = len(await db.users.distinct("user_id", {"last_seen_at": {"$gte": week_ago}}))
+    premium = await db.users.count_documents({"is_premium": True})
+    monthly = await db.users.count_documents({"plan": "premium_monthly", "is_premium": True})
+    yearly = await db.users.count_documents({"plan": "premium_yearly", "is_premium": True})
+    cloud_users = await db.storage_prefs.count_documents({"mode": "cloud"})
+    local_users = await db.storage_prefs.count_documents({"mode": {"$in": ["local", "never"]}})
+    paid_count = await db.payment_transactions.count_documents({"payment_status": "paid"})
+    # Revenue by currency
+    pipeline = [
+        {"$match": {"payment_status": "paid"}},
+        {"$group": {"_id": "$currency", "amount": {"$sum": "$amount"}, "n": {"$sum": 1}}},
+    ]
+    revenue = []
+    async for row in db.payment_transactions.aggregate(pipeline):
+        revenue.append({"currency": row["_id"], "amount": float(row["amount"]), "transactions": row["n"]})
+    return {
+        "users": {
+            "total": total_users,
+            "active_7d": active_7d,
+            "premium": premium,
+            "premium_monthly": monthly,
+            "premium_yearly": yearly,
+            "cloud_mode": cloud_users,
+            "local_mode": local_users,
+        },
+        "revenue": revenue,
+        "transactions_paid": paid_count,
+    }
 
 
 app.include_router(api)

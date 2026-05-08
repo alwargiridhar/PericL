@@ -1,4 +1,4 @@
-import { Sun, Moon, BarChart3, LogOut, User, MessageCircle, Calendar, Brain, Lock, Shield, KeyRound, Target, Search } from "lucide-react";
+import { Sun, Moon, BarChart3, LogOut, User, MessageCircle, Calendar, Brain, Lock, Shield, KeyRound, Target, Search, Home as HomeIcon, BookOpen, CreditCard } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +44,26 @@ export default function Header({ onOpenRecaps }) {
                 </div>
 
                 <div className="ml-auto flex items-center gap-1">
+                    <Button
+                        data-testid="header-home-btn"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate("/")}
+                        className="rounded-full h-9 w-9"
+                        aria-label="Home"
+                    >
+                        <HomeIcon className="w-4 h-4" />
+                    </Button>
+                    <Button
+                        data-testid="header-journal-btn"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => navigate("/journal")}
+                        className="rounded-full h-9 w-9"
+                        aria-label="Journal"
+                    >
+                        <BookOpen className="w-4 h-4" />
+                    </Button>
                     <Button
                         data-testid="header-search-btn"
                         variant="ghost"
@@ -137,6 +157,13 @@ export default function Header({ onOpenRecaps }) {
                             >
                                 <Brain className="w-4 h-4 mr-2" />
                                 Personality test
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                data-testid="menu-account"
+                                onClick={() => navigate("/account")}
+                            >
+                                <CreditCard className="w-4 h-4 mr-2" />
+                                Account &amp; plan
                             </DropdownMenuItem>
                             <DropdownMenuItem
                                 data-testid="menu-privacy"

@@ -31,8 +31,8 @@ def _load_base_url():
 
 
 BASE_URL = _load_base_url()
-USER_TOKEN = "test_sess_1777379746360"
-ADMIN_TOKEN = "sa_sess_test_001"
+USER_TOKEN = "test_sess_pa_001"
+ADMIN_TOKEN = "sa_sess_pa_001"
 
 
 @pytest.fixture(scope="module")

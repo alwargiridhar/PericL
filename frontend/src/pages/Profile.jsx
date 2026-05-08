@@ -9,6 +9,7 @@ import { profile as profileStore, personality as personalityStore } from "@/lib/
 import { useAuth } from "@/contexts/AuthContext";
 import Footer from "@/components/Footer";
 import MoodChart from "@/components/MoodChart";
+import PersonalityEvolution from "@/components/PersonalityEvolution";
 
 const FIELDS = [
     "name", "age", "occupation", "goals", "challenges",
@@ -105,6 +106,7 @@ export default function Profile() {
                 </div>
 
                 <MoodChart days={30} />
+                <PersonalityEvolution />
 
                 <Section icon={User} title="Basic information" subtitle="Tell us about yourself">
                     <div className="grid sm:grid-cols-2 gap-3">

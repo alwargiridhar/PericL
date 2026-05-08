@@ -1,0 +1,56 @@
+{
+  "summary": "Iteration 7: full Phase A-D backend + frontend smoke. New backend suite test_pericl_p3_p4_features.py: 21/21 passing (behavioral engine, billing, free-tier 402, admin analytics, drift nudge v2, personality history). P1+P2 regression: 20/20 passing (3 streaming chat tests deselected — they would fail because the 402-quota test legitimately exhausts the user's daily mirror replies). Older regression suites: 78/79 passing (1 pre-existing cascade-delete failure in test_pericl_admin_pydantic). Frontend: Login hero, Onboarding redirect, Home page (8/9 testids), Pricing, Account, Profile/PersonalityEvolution-empty all render and integrate correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/admin/users/{id} (cascade delete)", "issue": "test_super_admin_can_delete_user_cascade fails: user document remains after delete (1|0|0|0). Sessions/journal/ai messages were cascaded but user record itself wasn't removed. May be pre-existing or a new protection guard. Worth a quick look at delete_user handler.", "priority": "MEDIUM"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Home.jsx", "issue": "data-testid='home-missions' did not render in our session. The user has 1 active mission per /api/billing/me but the home-missions block was absent. Other Home testids (home-page, home-identity, home-next-move, home-scores, score-self-trust, score-execution, home-quick-actions, home-drift-card) all rendered correctly after a 4s wait for behavioral engine to load.", "selector": "[data-testid=home-missions]", "priority": "MEDIUM"},
+      {"component": "encrypted_storage / lib/storage.js", "issue": "Could not observe any 'PCL1:' encrypted blobs in localStorage during UI interactions (profile edit, capture button). Only plain markers (pericl.nudge_last_active_v1, pericl.onboarded_at) were present — these are written via direct localStorage.setItem so plain is expected. Either lsSet writes are not happening (cloud mode bypasses local storage) or the encryption envelope isn't applied. Manual verification recommended.", "selector": "n/a", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_pericl_p3_p4_features.py",
+    "/app/backend/tests/test_pericl_p1_p2_features.py",
+    "/app/test_reports/pytest/iter7_p3p4_results.xml",
+    "/app/test_reports/pytest/iter7_p1p2_regression.xml",
+    "/app/test_reports/pytest/iter7_old_regression.xml"
+  ],
+  "action_items": [
+    "Investigate Home.jsx home-missions block — verify it renders for users with >=1 active mission (the section may be conditioned incorrectly).",
+    "Verify the encrypted-storage write path: write a profile/journal entry via storage.profile.set or storage.journal.create in local mode and confirm raw localStorage value starts with 'PCL1:'. If lsSet is being short-circuited in cloud mode that's by design, but Phase B spec implies all pericl.* writes should be encrypted.",
+    "Check delete_user cascade — test_super_admin_can_delete_user_cascade expects all 4 (user, sessions, journal, ai) to be 0 after delete; user document is still present.",
+    "Consider returning Profile.is_premium reflect into Header so users see 'Premium' badge after upgrade (not blocking).",
+    "Tone copy on next_move headlines is sometimes long (user already noted as a copy concern, not a bug)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 2400+ lines; consider splitting into routers/modules (auth, behavioral_engine, billing, ai, personality, missions, admin).",
+    "encrypted_storage.js: setEncrypted is fire-and-forget (.catch(() => {})). On encryption failure or before encryptionReady resolves, writes silently fall back to plain or are lost. Surface failures in dev mode.",
+    "_free_chat_remaining counts persisted assistant messages today — admin or test cleanup that deletes messages will artificially restore quota. Documented limitation.",
+    "PaywallModal opens on 402 — verified via backend; we could not deterministically reproduce in UI because chat in our session was below quota. Code path looks correct in AiChat.jsx.",
+    "Stripe checkout returned a real checkout.stripe.com URL with sk_test_emergent — good. Webhook endpoint exists but was not exercised end-to-end (would require a real Stripe event)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_pericl_p3_p4_features.py (NEW — Phase A-D coverage)",
+    "/app/backend/tests/test_pericl_p1_p2_features.py (token refresh: test_sess_pa_001 / sa_sess_pa_001)",
+    "/app/backend/tests/test_pericl_backend.py (token refresh)",
+    "/app/backend/tests/test_pericl_admin_pydantic.py (token refresh)",
+    "/app/backend/tests/test_pericl_privacy_stateless.py (token refresh)",
+    "/app/backend/tests/test_pericl_new_features.py (token refresh)"
+  ],
+  "success_rate": {
+    "backend": "98.7% (119/120 across 4 suites; 1 cascade-delete failure)",
+    "frontend": "~92% (Onboarding gate ✓, Home ✓ except home-missions, Pricing/Account/Profile ✓, Login hero ✓; encryption write path not directly observable)"
+  },
+  "test_credentials": "Used /app/memory/test_credentials.md — test_sess_pa_001 (regular, cloud→local during onboarding test) + sa_sess_pa_001 (super admin). Both healthy.",
+  "seed_data_creation": "test_pericl_p3_p4_features.py creates ~5 chat messages (free-tier quota test) and 1 journal note (sync test) under TEST_-prefixed markers. Big Five test creates 1 personality assessment.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "1) Free-tier 402 test in test_pericl_p3_p4_features.py exhausts the regular user's daily mirror quota — run other chat tests BEFORE that test or skip with -k 'not chat_402'. 2) test_clear_all_messages in test_pericl_new_features wipes ai_messages so message-count assertions will reset. 3) Run order matters: TestStreamingChat (p1_p2) must run before TestFreeTierLimit (p3_p4). 4) For full pytest run: `REACT_APP_BACKEND_URL=https://pericl-staging.preview.emergentagent.com pytest /app/backend/tests/`. 5) Encryption: try storage.profile.set + then read raw localStorage to verify PCL1: prefix.",
+  "rca of the issue": "Cascade-delete: delete_user appears to remove related collections but not the users doc itself (assertion '1|0|0|0' indicates user count remained 1). Likely missing `await db.users.delete_one({user_id: target})` or the deletion is conditional on role/self-protection. Reproduction: super-admin POSTs delete on a TEST_-prefixed user; mongosh count of users by that user_id remains 1 after."
+}

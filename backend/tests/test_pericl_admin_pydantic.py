@@ -4,8 +4,8 @@ import pytest
 import requests
 
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
-SA_TOKEN = "sa_sess_test_001"
-USER_TOKEN = "test_sess_1777379746360"
+SA_TOKEN = "sa_sess_pa_001"
+USER_TOKEN = "test_sess_pa_001"
 USER_ID = "test-user-pericl-1777377818066"
 SA_USER_ID = "user_superalwar01"
 

@@ -13,7 +13,7 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pericl-staging.preview.emergentagent.com").rstrip("/")
-TOKEN = os.environ.get("PERICL_TEST_TOKEN", "test_sess_1777379746360")
+TOKEN = os.environ.get("PERICL_TEST_TOKEN", "test_sess_pa_001")
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 
 

@@ -20,6 +20,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useStorage } from "@/contexts/StorageContext";
 import Footer from "@/components/Footer";
 import MoodEmojiBurst from "@/components/MoodEmojiBurst";
+import PaywallModal from "@/components/PaywallModal";
 
 // Lightweight client-side mood heuristic — used in local mode to avoid an extra
 // LLM round-trip when the user has chosen privacy. Falls back to "happy" so
@@ -50,6 +51,7 @@ export default function AiChat() {
     const [personality, setPersonality] = useState(null);
     const [mood, setMood] = useState(null);
     const [moodTrigger, setMoodTrigger] = useState(0);
+    const [paywallOpen, setPaywallOpen] = useState(false);
     const endRef = useRef(null);
 
     useEffect(() => {
@@ -124,9 +126,15 @@ export default function AiChat() {
                 user_message,
                 assistant_message,
             ]);
-        } catch {
-            toast.error("Couldn't reach you. Try again?");
-            setMessages((prev) => prev.filter((m) => m.id !== optimistic.id && m.id !== streamId));
+        } catch (err) {
+            // Free-tier daily limit hit
+            if (err?.response?.status === 402) {
+                setPaywallOpen(true);
+                setMessages((prev) => prev.filter((m) => m.id !== optimistic.id && m.id !== streamId));
+            } else {
+                toast.error("Couldn't reach you. Try again?");
+                setMessages((prev) => prev.filter((m) => m.id !== optimistic.id && m.id !== streamId));
+            }
         } finally {
             setLoading(false);
         }
@@ -302,6 +310,12 @@ export default function AiChat() {
                 </div>
             </div>
             <Footer />
+            <PaywallModal
+                open={paywallOpen}
+                onClose={() => setPaywallOpen(false)}
+                title="You've used your free reflections for today."
+                body="Premium unlocks unlimited mirror replies, emotional memory continuity, and cross-device sync. Take it for a month and see if it changes how you actually act."
+            />
         </div>
     );
 }

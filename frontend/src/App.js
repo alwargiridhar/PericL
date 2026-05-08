@@ -6,6 +6,7 @@ import { StorageProvider } from "@/contexts/StorageContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import AuthCallback from "@/components/AuthCallback";
 import Login from "@/pages/Login";
+import Home from "@/pages/Home";
 import Journal from "@/pages/Journal";
 import AiChat from "@/pages/AiChat";
 import Profile from "@/pages/Profile";
@@ -19,6 +20,9 @@ import Privacy from "@/pages/Privacy";
 import Admin from "@/pages/Admin";
 import MissionsPage from "@/pages/Missions";
 import SearchPage from "@/pages/Search";
+import Onboarding from "@/pages/Onboarding";
+import Pricing from "@/pages/Pricing";
+import Account from "@/pages/Account";
 
 function AppRouter() {
     const location = useLocation();
@@ -28,9 +32,13 @@ function AppRouter() {
     return (
         <Routes>
             <Route path="/login" element={<Login />} />
-            <Route path="/" element={<ProtectedRoute><Journal /></ProtectedRoute>} />
+            <Route path="/pricing" element={<Pricing />} />
+            <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
+            <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+            <Route path="/journal" element={<ProtectedRoute><Journal /></ProtectedRoute>} />
             <Route path="/chat" element={<ProtectedRoute><AiChat /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+            <Route path="/account" element={<ProtectedRoute><Account /></ProtectedRoute>} />
             <Route path="/search" element={<ProtectedRoute><SearchPage /></ProtectedRoute>} />
             <Route path="/personality/assessment" element={<ProtectedRoute><PersonalityAssessment /></ProtectedRoute>} />
             <Route path="/personality/mbti" element={<ProtectedRoute><MbtiAssessment /></ProtectedRoute>} />

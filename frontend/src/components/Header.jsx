@@ -12,6 +12,7 @@ import {
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStorage } from "@/contexts/StorageContext";
+import Logo from "@/components/Logo";
 
 export default function Header({ onOpenRecaps }) {
     const { theme, toggle } = useTheme();
@@ -26,9 +27,7 @@ export default function Header({ onOpenRecaps }) {
         >
             <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
                 <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-2xl bg-primary text-primary-foreground grid place-items-center font-display font-medium">
-                        P
-                    </div>
+                    <Logo size={36} />
                     <div className="leading-tight">
                         <div className="font-display text-base font-medium">PericL</div>
                         <div className="text-[11px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">

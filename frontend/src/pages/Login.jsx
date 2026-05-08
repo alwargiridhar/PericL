@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import Logo from "@/components/Logo";
 
 // Subtle entrance animation — fade + slight rise.
 const fadeUp = {
@@ -79,9 +80,7 @@ export default function Login() {
             {/* Top nav */}
             <header className="relative z-20 max-w-6xl mx-auto px-6 sm:px-10 pt-6 flex items-center justify-between">
                 <div className="flex items-center gap-2.5" data-testid="landing-brand">
-                    <div className="w-9 h-9 rounded-2xl bg-primary text-primary-foreground grid place-items-center font-display font-medium text-base">
-                        P
-                    </div>
+                    <Logo size={36} />
                     <div className="leading-tight">
                         <div className="font-display text-base">PericL</div>
                         <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
@@ -735,9 +734,7 @@ function FooterLogin() {
         <footer className="relative z-10 border-t border-border/40">
             <div className="max-w-6xl mx-auto px-6 sm:px-10 py-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-muted-foreground">
                 <div className="flex items-center gap-2.5">
-                    <div className="w-6 h-6 rounded-md bg-primary text-primary-foreground grid place-items-center font-display text-[11px]">
-                        P
-                    </div>
+                    <Logo size={22} />
                     <span>© {new Date().getFullYear()} Giridhar Alwar · PericL · A Private Behavioral OS</span>
                 </div>
                 <div className="flex items-center gap-1.5 uppercase tracking-[0.22em]">

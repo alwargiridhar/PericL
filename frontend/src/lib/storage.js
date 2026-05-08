@@ -925,6 +925,28 @@ export const mood = {
     },
 };
 
+// ---------- Drift nudge (returning-after-away gentle prompt) ----------
+export const drift = {
+    async generate(minutesAway) {
+        const minutes = Math.max(1, Math.round(minutesAway || 30));
+        if (isCloud()) {
+            const r = await api.post("/ai/drift-nudge", { minutes_away: minutes });
+            return r.data;
+        }
+        const profile = lsGet(LS.PROFILE, null);
+        const missions = lsGet(LS.MISSIONS, [])
+            .filter((m) => m.is_active !== false)
+            .slice(0, 3)
+            .map(_serializeMissionLocal);
+        const r = await api.post("/ai/drift-nudge-stateless", {
+            minutes_away: minutes,
+            profile,
+            missions,
+        });
+        return r.data;
+    },
+};
+
 // ---------- Bulk migrate (when user upgrades local → cloud) ----------
 export async function migrateLocalToCloud() {
     const payload = {

@@ -1803,6 +1803,85 @@ async def stateless_detect_progress(payload: dict, user: User = Depends(get_curr
     return detection or {"mission_id": None, "track_id": None, "units": 0, "effort": "medium", "confidence": 0}
 
 
+async def ai_drift_nudge(profile: dict | None, missions: list[dict] | None, minutes_away: int) -> dict:
+    """Generate a short, humble nudge asking the user to put the phone down
+    and take one small step back toward their stated goal. Returns:
+      { "message": str (1-2 sentences, warm second person),
+        "next_move": str (one specific action under 15 min) }
+    """
+    goals_text = ""
+    if profile and profile.get("goals"):
+        goals_text = profile["goals"]
+    if missions:
+        m_lines = []
+        for m in missions[:3]:
+            title = m.get("outcome") or m.get("title") or ""
+            if title:
+                m_lines.append(f"- {title}")
+        if m_lines:
+            goals_text = (goals_text + "\n" + "\n".join(m_lines)).strip()
+    goals_text = (goals_text or "(no explicit goals yet)").strip()
+
+    sys = (
+        "You are the user's own reflective inner voice — NOT an assistant, NOT an AI. "
+        "The user has been away from their journal for a long time, likely scrolling on their phone. "
+        "Be humble, warm, honest, and brief — never preachy, never moralistic, never guilt-inducing. "
+        "No emoji except a single 🎯 on the next-move line. "
+        "Return ONLY JSON: "
+        "{\"message\": str (1-2 sentences, second person, anchored to their actual goal), "
+        "\"next_move\": str (one specific action under 15 minutes, concrete and small)}. "
+        "Do not mention Instagram, YouTube, TikTok, or shame them. Say it like a friend would."
+    )
+    chat = (
+        LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"drift-{uuid.uuid4().hex[:8]}", system_message=sys)
+        .with_model("openai", "gpt-5.2")
+    )
+    user_msg = UserMessage(
+        text=(
+            f"Time away from journal: ~{minutes_away} minutes.\n"
+            f"User's goals / active missions:\n{goals_text}"
+        )
+    )
+    try:
+        raw = (await chat.send_message(user_msg)).strip()
+        m = re.search(r"\{.*\}", raw, re.DOTALL)
+        if m:
+            data = json.loads(m.group(0))
+            msg = (data.get("message") or "").strip()
+            nxt = (data.get("next_move") or "").strip()
+            if msg and nxt:
+                return {"message": msg, "next_move": nxt}
+    except Exception as e:
+        logger.warning("drift nudge fallback: %s", e)
+    # Deterministic fallback that never blames the user.
+    first_goal = (goals_text.splitlines() or ["what matters to you"])[0].lstrip("- ").strip() or "what matters to you"
+    return {
+        "message": (
+            f"You've been away a while. "
+            f"It's fine — just pick the smallest move back toward {first_goal}."
+        ),
+        "next_move": "Open your journal and type one honest sentence about where you actually are right now.",
+    }
+
+
+@api.post("/ai/drift-nudge")
+async def cloud_drift_nudge(payload: dict, user: User = Depends(get_current_user)):
+    minutes_away = int(payload.get("minutes_away") or 30)
+    profile = await db.user_profiles.find_one({"user_id": user.user_id}, {"_id": 0})
+    mission_docs = await db.missions.find(
+        {"user_id": user.user_id, "is_active": True}, {"_id": 0}
+    ).sort("created_at", -1).limit(3).to_list(length=3)
+    return await ai_drift_nudge(profile, mission_docs, minutes_away)
+
+
+@api.post("/ai/drift-nudge-stateless")
+async def stateless_drift_nudge(payload: dict):
+    minutes_away = int(payload.get("minutes_away") or 30)
+    profile = payload.get("profile") or None
+    missions = payload.get("missions") or []
+    return await ai_drift_nudge(profile, missions, minutes_away)
+
+
 # ---------------------------- Health ----------------------------
 @api.get("/")
 async def root():

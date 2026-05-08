@@ -1,5 +1,25 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import useDriftNudge from "@/hooks/useDriftNudge";
+import DriftNudgeModal from "@/components/DriftNudgeModal";
+import InstallAppPrompt from "@/components/InstallAppPrompt";
+
+function Shell({ children }) {
+    const nudge = useDriftNudge();
+    return (
+        <>
+            {children}
+            <DriftNudgeModal
+                open={nudge.open}
+                payload={nudge.payload}
+                loading={nudge.loading}
+                onSnooze={nudge.snooze}
+                onDismiss={nudge.dismiss}
+            />
+            <InstallAppPrompt />
+        </>
+    );
+}
 
 export default function ProtectedRoute({ children }) {
     const { user, loading } = useAuth();
@@ -15,5 +35,5 @@ export default function ProtectedRoute({ children }) {
     if (!user) {
         return <Navigate to="/login" replace state={{ from: location }} />;
     }
-    return children;
+    return <Shell>{children}</Shell>;
 }

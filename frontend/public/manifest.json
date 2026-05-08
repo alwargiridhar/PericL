@@ -1,0 +1,55 @@
+{
+    "name": "PericL — Personal Voice Journal",
+    "short_name": "PericL",
+    "description": "Your inner voice, written down. A personal mirror — not an AI assistant.",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "orientation": "portrait-primary",
+    "background_color": "#F7F5F2",
+    "theme_color": "#6B7F5B",
+    "categories": ["productivity", "lifestyle", "health"],
+    "lang": "en",
+    "icons": [
+        {
+            "src": "/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "/icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "/icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Talk to yourself",
+            "short_name": "Mirror",
+            "description": "Open the Mirror chat",
+            "url": "/chat",
+            "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+        },
+        {
+            "name": "Missions",
+            "short_name": "Missions",
+            "description": "Your active missions",
+            "url": "/missions",
+            "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+        }
+    ]
+}

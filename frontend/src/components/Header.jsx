@@ -32,7 +32,7 @@ export default function Header({ onOpenRecaps }) {
                     <div className="leading-tight">
                         <div className="font-display text-base font-medium">PericL</div>
                         <div className="text-[11px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                            <span>Personal Voice Journal</span>
+                            <span>A Private Behavioral OS</span>
                             {mode !== "cloud" && (
                                 <span className="inline-flex items-center gap-1 text-primary" title="Stored on this device only">
                                     <Lock className="w-2.5 h-2.5" />

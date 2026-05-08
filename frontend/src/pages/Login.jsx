@@ -85,7 +85,7 @@ export default function Login() {
                     <div className="leading-tight">
                         <div className="font-display text-base">PericL</div>
                         <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                            Personal Voice Journal
+                            A Private Behavioral OS
                         </div>
                     </div>
                 </div>
@@ -145,8 +145,9 @@ export default function Login() {
                         transition={{ delay: 0.15, duration: 0.55 }}
                         className="mt-7 text-lg sm:text-xl text-muted-foreground max-w-xl leading-relaxed"
                     >
-                        Your thoughts, distractions, goals, and actions — aligned in one private system that
-                        keeps you honest with yourself, without ever sending your reflections to anyone.
+                        A <span className="text-foreground font-medium">Private Behavioral Operating System</span>{" "}
+                        designed to help you reduce distraction, improve focus, and stay aligned with who you said
+                        you wanted to become.
                     </motion.p>
 
                     <motion.div
@@ -217,6 +218,40 @@ export default function Login() {
 
                 <Reveal delay={1} className="mt-12">
                     <FullChatExchange />
+                </Reveal>
+            </section>
+
+            {/* Pericl notices when you drift — behavioral observation */}
+            <section
+                id="drift-detection"
+                className="relative z-10 max-w-5xl mx-auto px-6 sm:px-10 py-20 sm:py-28 border-t border-border/40"
+            >
+                <Reveal>
+                    <div className="max-w-2xl">
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground inline-flex items-center gap-2">
+                            <ChevronDown className="w-3 h-3 -rotate-90" /> Behavioral observation
+                        </div>
+                        <h2 className="mt-3 font-display text-3xl sm:text-5xl tracking-tight leading-[1.05]">
+                            Pericl notices
+                            <br />
+                            <span className="italic text-primary">when you drift.</span>
+                        </h2>
+                        <p className="mt-5 text-base sm:text-lg text-muted-foreground leading-relaxed">
+                            It quietly tracks when your actions stop matching your goals — distraction loops, missed
+                            execution windows, momentum loss — and gently helps you realign before drift becomes a cycle.
+                        </p>
+                    </div>
+                </Reveal>
+
+                <Reveal delay={1} className="mt-12">
+                    <DriftObservations />
+                </Reveal>
+
+                <Reveal delay={2} className="mt-8">
+                    <p className="text-xs text-muted-foreground max-w-md leading-relaxed">
+                        Rare and accurate is better than constant. Pericl never feels like a monitor — it feels like a
+                        calm mirror that knows when to speak.
+                    </p>
                 </Reveal>
             </section>
 
@@ -531,6 +566,58 @@ function HeroChatMockup() {
     );
 }
 
+function DriftObservations() {
+    const observations = [
+        { time: "9:47 pm · Wed", text: "You've been scrolling for 42 minutes." },
+        { time: "8:12 pm · Wed", text: "You usually drift around this time." },
+        { time: "7:06 pm · Wed", text: "You haven't touched your main mission today." },
+        { time: "10:21 am · Thu", text: "Want to start with just 5 minutes?", action: true },
+    ];
+    return (
+        <div
+            className="rounded-[1.75rem] border border-border/60 bg-card/40 backdrop-blur-xl p-5 sm:p-7 max-w-2xl"
+            data-testid="landing-drift-observations"
+        >
+            <div className="flex items-center justify-between mb-4">
+                <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                    Quiet observations · this week
+                </div>
+                <span className="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                    on-device
+                </span>
+            </div>
+            <ol className="space-y-3 sm:space-y-4">
+                {observations.map((o, i) => (
+                    <motion.li
+                        key={i}
+                        initial={{ opacity: 0, x: -8 }}
+                        whileInView={{ opacity: 1, x: 0 }}
+                        viewport={{ once: true, margin: "-10% 0px" }}
+                        transition={{ delay: 0.1 * i, duration: 0.4 }}
+                        className="flex items-start gap-4"
+                        data-testid={`landing-drift-observation-${i}`}
+                    >
+                        <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground tabular-nums w-24 sm:w-32 shrink-0 pt-1.5">
+                            {o.time}
+                        </div>
+                        <div className="flex-1 min-w-0 border-l border-border/60 pl-4 pb-1">
+                            <p className="text-[15px] sm:text-base leading-relaxed text-foreground/85">
+                                {o.text}
+                            </p>
+                            {o.action && (
+                                <div className="mt-2 inline-flex items-center gap-1.5 text-[12px] text-primary">
+                                    <span className="font-medium">🎯 Start Next Move</span>
+                                </div>
+                            )}
+                        </div>
+                    </motion.li>
+                ))}
+            </ol>
+        </div>
+    );
+}
+
 function FullChatExchange() {
     const lines = [
         { side: "mine", text: "i keep saying i'll write — i haven't opened the doc in 4 days." },
@@ -651,7 +738,7 @@ function FooterLogin() {
                     <div className="w-6 h-6 rounded-md bg-primary text-primary-foreground grid place-items-center font-display text-[11px]">
                         P
                     </div>
-                    <span>© {new Date().getFullYear()} Giridhar Alwar · PericL · Personal Voice Journal</span>
+                    <span>© {new Date().getFullYear()} Giridhar Alwar · PericL · A Private Behavioral OS</span>
                 </div>
                 <div className="flex items-center gap-1.5 uppercase tracking-[0.22em]">
                     <Lock className="w-3 h-3" /> on-device, by default

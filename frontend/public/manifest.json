@@ -1,7 +1,7 @@
 {
-    "name": "PericL — Personal Voice Journal",
+    "name": "PericL — A Private Behavioral OS",
     "short_name": "PericL",
-    "description": "Your inner voice, written down. A personal mirror — not an AI assistant.",
+    "description": "A private behavioral operating system. Reduce distraction, stay aligned with who you said you wanted to become.",
     "start_url": "/",
     "scope": "/",
     "display": "standalone",

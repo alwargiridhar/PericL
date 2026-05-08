@@ -241,34 +241,46 @@ export default function Home() {
                             />
                         </motion.section>
 
-                        {/* Missions */}
-                        {(data.missions || []).length > 0 && (
-                            <motion.section
-                                initial={{ opacity: 0, y: 12 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.2, duration: 0.5 }}
-                                className="space-y-3"
-                                data-testid="home-missions"
-                            >
-                                <div className="flex items-center justify-between">
-                                    <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-                                        Active missions
-                                    </div>
-                                    <button
-                                        data-testid="home-missions-link"
-                                        onClick={() => navigate("/missions")}
-                                        className="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
-                                    >
-                                        Manage <ArrowRight className="w-3 h-3" />
-                                    </button>
+                        {/* Missions — always render the section header so users see the slot */}
+                        <motion.section
+                            initial={{ opacity: 0, y: 12 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.2, duration: 0.5 }}
+                            className="space-y-3"
+                            data-testid="home-missions"
+                        >
+                            <div className="flex items-center justify-between">
+                                <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                                    Active missions
                                 </div>
+                                <button
+                                    data-testid="home-missions-link"
+                                    onClick={() => navigate("/missions")}
+                                    className="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
+                                >
+                                    {(data.missions || []).length > 0 ? "Manage" : "Add a mission"}
+                                    <ArrowRight className="w-3 h-3" />
+                                </button>
+                            </div>
+                            {(data.missions || []).length > 0 ? (
                                 <div className="space-y-2.5">
                                     {data.missions.slice(0, 3).map((m) => (
                                         <MissionCard key={m.id} m={m} onClick={() => navigate("/missions")} />
                                     ))}
                                 </div>
-                            </motion.section>
-                        )}
+                            ) : (
+                                <button
+                                    data-testid="home-missions-empty"
+                                    onClick={() => navigate("/missions")}
+                                    className="w-full rounded-3xl border border-dashed border-border/60 bg-card/30 p-5 text-left hover:border-primary/40 transition-colors"
+                                >
+                                    <p className="text-sm text-muted-foreground leading-relaxed">
+                                        Set up to 3 quarterly missions and Pericl will track your pace,
+                                        consistency, and follow-through automatically.
+                                    </p>
+                                </button>
+                            )}
+                        </motion.section>
 
                         {/* Quick actions */}
                         <motion.section

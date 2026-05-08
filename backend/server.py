@@ -1452,9 +1452,13 @@ async def admin_delete_user(target_user_id: str, admin: User = Depends(get_super
     # Cascade-delete this user's content (cloud-mode data)
     for col in ("user_sessions", "user_profiles", "personality_assessments",
                 "ai_messages", "daily_prompts", "daily_recaps",
-                "journal_items", "audio_blobs", "storage_prefs"):
+                "journal_items", "audio_blobs", "storage_prefs",
+                "missions", "mission_progress", "payment_transactions"):
         await db[col].delete_many({"user_id": target_user_id})
-    await db.users.delete_one({"user_id": target_user_id})
+    res = await db.users.delete_one({"user_id": target_user_id})
+    if res.deleted_count == 0:
+        # Defensive: fall back to deleting by email if a stray record exists.
+        await db.users.delete_one({"email": target.get("email")})
     await _audit(admin, "delete_user", target_user_id, {
         "target_email": target.get("email"), "target_name": target.get("name"),
         "target_role": target.get("role", "user"),

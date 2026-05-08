@@ -1,69 +1,88 @@
-# PericL — Personal Voice Journal
+# PericL — Personal Voice Journal → Private Behavioral OS
 © Giridhar Alwar
 
-## What it is
-A personal **mirror, not an assistant**. PericL helps the user convert thoughts into clear action, track real progress toward their goals, and gently confront gaps between intention and behavior.
+## Positioning (since iter 7)
+**Stop drifting. Start becoming.** A private behavioral operating system that helps users stay aligned with who they said they wanted to become — without sacrificing privacy.
 
-The chat must always feel like the user's own voice — slightly calmer, slightly more honest, slightly more disciplined.
+Core promise:
+- **Mirror, not assistant** — never use "AI", "chatbot", "assistant"
+- **Privacy-first by default** — Local Private Mode is the onboarding default; Cloud Intelligence is opt-in
+- **Behavioral, not motivational** — drift detection + execution scoring + Self-Trust score
+- **Premium = clarity, not tokens**
 
-## Mirror system prompt (iter 5)
-Always executes 4 steps and ends with EXACTLY ONE 🎯 Next Move (<15 min, specific, aligned to a top goal):
-1. **Clarify**, 2. **Mirror**, 3. **Reality check**, 4. **Direct (one Next Move)**.
-Inputs: top 3 goals, identity, MBTI/Big Five, behavior signals (entries/tasks/reminders/moods/last 7-14d), mood (regex inferred), active missions with stats.
+## Architecture (current)
+- Backend (FastAPI + Motor + MongoDB): /app/backend/server.py (~2900 lines — flagged for split)
+- Frontend (React CRA + Tailwind + shadcn/ui + framer-motion + recharts)
+- PWA (manifest.json + sw.js + icons + drift-nudge timer)
+- Stripe Checkout (sk_test_emergent in pod env) — region pricing US/IN
 
-## Architecture
-- Backend (FastAPI + Motor + MongoDB): /app/backend/server.py (~2200 lines)
-  - Auth: Emergent Google + auto super_admin for `alwargiridhar@gmail.com`
-  - Cloud user-content endpoints (mode=cloud)
-  - Stateless AI: `/ai/transcribe`, `/categorize`, `/chat-stateless`, `/recap-stateless`, `/personality-analyze`, `/big-five-analyze`, `/daily-prompt-pick`, `/detect-progress`
-  - **Streaming SSE**: `/ai/chat/stream` (cloud, persists), `/ai/chat-stateless/stream` (local) — uses litellm.acompletion via Emergent proxy
-  - **Search**: `/search?q=` across journal_items + ai_messages
-  - **Mood timeline**: `/mood/timeline?days=`
-  - **Big Five**: `/personality/big-five-assess`
-  - **Sync**: `/sync/import` (idempotent bulk upsert), `/sync/export`
-  - **Audit log**: `/admin/audit-log` (rows written on role change + delete user)
-  - Privacy: `/storage/pref` GET/PUT, `/storage/prompt-shown`
-  - Admin: `/admin/users`, `/admin/users/{id}/role`, `/admin/users/{id}` DELETE, `/admin/stats`
-  - Missions: `/missions`, `/missions/{id}/progress`, `/ai/detect-progress`
+## Routes
+- `/` — Home (Identity · Drift · Next Move · Scores · Missions · Quick Actions)
+- `/journal` — original timeline (voice + text capture, snooze, push reminders)
+- `/chat` — Mirror (streaming SSE, paywall on free quota)
+- `/missions` · `/profile` · `/search` · `/admin`
+- `/personality/{assessment, mbti, big-five, big-five/result/:id, result/:id}`
+- `/onboarding` — mandatory privacy picker (Local Private vs Cloud Intelligence)
+- `/pricing` — region toggle, Free vs Premium tiers, Stripe Checkout
+- `/account` — plan + remaining limits + upgrade
+- `/privacy` — mode + drift-nudge config + cloud download
+- `/login` — landing page (new "Stop drifting. Start becoming." hero)
 
-- Frontend (React CRA + Tailwind + shadcn/ui)
-  - Pages: Login · Journal · AiChat · Profile · Search · PersonalityAssessment (chooser) · MbtiAssessment · BigFiveAssessment · BigFiveResult · PersonalityResult · DailyPrompt · Privacy · Admin · Missions
-  - Components: Header (search btn) · TimelineItem (snooze dropdown for reminders) · MoodChart (recharts) · MoodEmojiBurst · CloudSyncPrompt · RecapDrawer · VoiceDock · Footer
-  - Hooks: useRecorder · useSpeechRecognition · usePushReminders (foreground browser Notifications)
-  - StorageContext gates child rendering until mode is loaded → no more local/cloud race
-  - lib/storage.js: chat.send + chat.sendStream (SSE), journal, missions, profile, personality (MBTI + Big Five), search, mood, prompt, recap, migrateLocalToCloud, migrateCloudToLocal
+## Backend endpoints (additions in iter 7)
+- `GET /api/scores`, `POST /api/scores-stateless` — Self-Trust + Execution + drift signal (deterministic)
+- `GET /api/insights/today`, `POST /api/insights/today-stateless` — scores + AI-generated next move + missions
+- `GET /api/personality/history` — sorted assessments for evolution chart
+- `_extract_communication_style()` — wired into chat system prompt (style mirroring)
+- `GET /api/billing/pricing?region=us|in` — public package list
+- `POST /api/billing/checkout` — creates Stripe session, persists payment_transactions
+- `GET /api/billing/status/{session_id}` — polls + flips is_premium on paid
+- `POST /api/webhook/stripe` — idempotent premium grant
+- `GET /api/billing/me` — subscription summary + remaining quota
+- `GET /api/admin/analytics` — total/active/premium/cloud_mode/local_mode + revenue by currency
+- `POST /api/ai/drift-nudge[-stateless]` — extended with personality + drift_count_today
+- Free-tier 402 on `/ai/chat` and `/ai/chat/stream` after 5 daily replies
+- Cascade-delete in `/admin/users/{id}` now covers missions + mission_progress + payment_transactions
+
+## Frontend (additions in iter 7)
+- `lib/encrypted_storage.js` — AES-GCM via Web Crypto, key in IndexedDB, `PCL1:` envelope, transparent fallback for legacy reads
+- `lib/storage.js` — wired through encrypted_storage; `lsGet/lsSet/lsDel` use it
+- `lib/behavioral_engine.js` — pure-function score computation + cloud-or-stateless `getTodayInsights`
+- `pages/Home.jsx` — Identity / Drift / Next Move / Score Rings / Missions / Quick Actions
+- `pages/Onboarding.jsx` — two-card privacy picker, gates first-time users
+- `pages/Pricing.jsx` — region toggle, Stripe Checkout buttons
+- `pages/Account.jsx` — plan summary + usage limits + upgrade + ?session_id polling
+- `components/PaywallModal.jsx` — soft 402 paywall in chat
+- `components/PersonalityEvolution.jsx` — recharts LineChart + delta phrases
+- `contexts/AuthContext.jsx` — awaits `encryptionReady` before /auth/me
+- `components/ProtectedRoute.jsx` — gates first-time users to /onboarding
+- `pages/AiChat.jsx` — opens PaywallModal on 402
+
+## Free vs Premium
+- **Free**: 3 active missions, 5 mirror replies/day, all on-device features
+- **Premium ($7.99/mo or ₹199/mo, $69/yr or ₹1499/yr)**: unlimited mirror, emotional memory, cloud sync, advanced reports
+
+## Privacy enforcement
+- Admins/super_admins CANNOT read journals, chats, reflections, voice — only metadata (counts, mode, role)
+- Local Private Mode: AES-GCM encrypted localStorage + stateless AI calls (no server logging)
+- Audit log on every role change + user delete
 
 ## Roles
-- `super_admin` — `alwargiridhar@gmail.com` only. Manages admins/users.
-- `admin` — granted by super admin. Reads users, demotes regular users.
-- `user` — default.
+- `super_admin` — `alwargiridhar@gmail.com` only. Auto-promoted on login.
+- `admin` — granted by super admin
+- `user` — default
 
-## Privacy modes
-- `local` (default) — content stays on device, AI calls stateless
-- `cloud` — managed sync to MongoDB
-- `never` — local + suppress monthly nudge
+## Implemented changelog
+- 2026-04-28 Iter 1-6: voice/text journal, MBTI + Big Five, Mirror chat, missions w/ auto-progress, mood timeline, daily prompts, daily recap, search, push reminders, snooze, PWA, install prompt, drift nudge v1, audit log, bidirectional sync
+- 2026-04-30 **Iter 7 — full repositioning to behavioral OS**:
+  - Phase A: new Home page with Self-Trust + Execution scores (deterministic) + Identity Header + Drift Insight + Next Move; mandatory Onboarding privacy picker
+  - Phase B: AES-GCM encrypted local storage; personality history endpoint + Evolution chart; communication-style mirroring in chat
+  - Phase C: Stripe Checkout integration with US/IN region pricing; free-tier 402 limits; PaywallModal; Account page; admin analytics expansion
+  - Phase D: drift nudge v2 (personality-aware + drift-count-aware tone)
 
-## Implemented (cumulative)
-- 2026-04-28 Iter 1: auth + voice/text journal + Whisper + GPT-5.2 categorize + recap (Gemini 3 Flash)
-- 2026-04-28 Iter 2: profile builder, MBTI test, AI personality analyzer, AI chat, daily reflection
-- 2026-04-28 Iter 3: privacy-first abstraction (local IDB audio), monthly cloud-sync modal, stateless AI endpoints
-- 2026-04-28 Iter 4: mood emoji burst, super admin auto-promote, Admin dashboard, Pydantic MbtiScores
-- 2026-04-28 Iter 5: strict Mirror system prompt with drift/reality engine + missions (3 active cap, tracks, auto-detected progress, mission stats injected into chat prompt)
-- 2026-04-28 **Iter 6** — P1+P2 batch:
-  - **Streaming chat replies** via SSE (litellm.acompletion stream) for both cloud + stateless
-  - **Search** across journal + chat (UI page /search; debounced; highlight)
-  - **Native push reminders** (foreground Notifications API + permission banner)
-  - **Big Five (OCEAN)** assessment + result page; chooser between MBTI and Big Five
-  - **Mood-over-time chart** (recharts area chart on /profile, day-aggregated, mood-coloured dots)
-  - **Reminder snooze** (10m / 1h / tomorrow / next week dropdown on TimelineItem)
-  - **Bidirectional local↔cloud sync** (`/sync/import` & `/sync/export`; cloud→local download in Privacy)
-  - **Admin audit log** (collection + UI section; logs role changes + user deletions)
-  - StorageContext now gates children until pref loaded — fixes prior local/cloud race
-
-## Backlog
-- P2: Move Mirror prompt to /app/backend/prompts/mirror_chat.md for cleaner diffs
-- P2: Mongo $facet aggregation for behavior signals once user content scales
-- P2: Subscription / premium tier
-- P2: Service-worker push reminders (background, even when tab closed)
-- P2: Split server.py into modules (auth, journal, ai, personality, missions, admin, sync) — currently 2200+ lines
-- P2: Migrate FastAPI on_event to lifespan
+## Known issues / backlog
+- server.py is 2900+ lines → split into routers (auth, behavioral_engine, billing, ai, personality, missions, admin, sync) — not blocking
+- Migrate FastAPI on_event → lifespan handlers
+- Move Mirror prompt to /app/backend/prompts/mirror_chat.md
+- Service-worker push reminders (background, when tab closed)
+- Big Five v2 retake comparison report (richer than current evolution chart)
+- Stripe customer portal endpoint (currently users cancel via direct Stripe email)
